@@ -9,10 +9,12 @@
     "start": "node server.mjs",
     "build": "node --check server.mjs && node --check cabinet.mjs && node --check knowledge.mjs && node --check public/app.js",
     "lint": "eslint .",
-    "test": "node --test"
+    "test": "node --test",
+    "test:browser": "playwright test"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.65.1",
     "eslint": "^10.15.0",
     "globals": "^17.14.0"
   }

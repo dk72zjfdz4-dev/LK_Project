@@ -12,3 +12,7 @@ node_modules/
 .DS_Store
 
 .recovery/
+
+/test-results/
+/playwright-report/
+/playwright/.cache/
