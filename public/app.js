@@ -25,6 +25,7 @@ const dayFormat = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'lon
 const moscowTimeFormat = new Intl.DateTimeFormat('ru-RU', {
   timeZone: 'Europe/Moscow', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
 });
+const pointsFormat = new Intl.NumberFormat('ru-RU', { maximumSignificantDigits: 15, useGrouping: false });
 const profileFields = {
   'profile-name': 'fullName',
   'profile-full-name': 'fullName',
@@ -43,6 +44,7 @@ let profile;
 let signingOut = false;
 let activeView;
 let schedule;
+let scheduleLoad;
 let cabinet;
 let cabinetLoad;
 let pollTimer;
@@ -108,7 +110,7 @@ function route(focusHeading = false) {
 
 function showLogin(message = '', focusHeading = false) {
   profile = undefined;
-  schedule = cabinet = cabinetLoad = selectedDay = selectedDialogue = dialogueLoad = lessonOpen = undefined;
+  schedule = scheduleLoad = cabinet = cabinetLoad = selectedDay = selectedDialogue = dialogueLoad = lessonOpen = undefined;
   window.clearInterval(pollTimer);
   renders.clear();
   byId('lesson-dialog').close();
@@ -176,6 +178,7 @@ function showApp(account, focusHeading = false) {
   loadCabinet();
   pollTimer = window.setInterval(() => {
     if (document.hidden || signingOut) return;
+    if (profile.role === 'student') loadSchedule({ quiet: true });
     loadCabinet({ quiet: true });
     if (activeView === 'messages' && selectedDialogue !== undefined) refreshDialogue(true);
   }, 12000);
@@ -278,10 +281,12 @@ function renderHome(lessons, nextWeekLessons, today) {
     byId('upcoming-lessons'), upcoming.slice(0, 4), (lesson) => upcomingRow(lesson, today),
     'Ближайших занятий в расписании нет.',
   );
-  const changed = lessons.filter((lesson) => lesson.change || lesson.cancelled);
+  const changed = [...lessons, ...nextWeekLessons]
+    .filter((lesson) => lesson.date >= today && (lesson.change || lesson.cancelled))
+    .sort(lessonOrder);
   renderList(
     byId('changed-lessons'), changed, (lesson) => changeRow(lesson, today),
-    'На этой неделе изменений нет.',
+    'Предстоящих изменений нет.',
   );
 }
 
@@ -374,26 +379,40 @@ function showScheduleStatus(message = '', canRetry = false) {
   }
 }
 
-async function loadSchedule() {
+async function loadSchedule({ quiet = false } = {}) {
   const student = profile;
-  showScheduleStatus('Загружаем расписание…');
+  if (!student || scheduleLoad) return;
+  const load = {};
+  scheduleLoad = load;
+  if (!quiet || !schedule) showScheduleStatus('Загружаем расписание…');
   try {
     const { today, weekStart, lessons, nextWeekLessons = [] } = await request('/api/schedule');
     if (profile !== student) return;
     lessons.sort(lessonOrder);
+    const calendarKey = JSON.stringify([today, weekStart, lessons]);
+    if (renders.get('calendar') !== calendarKey) {
+      if (selectedDay === schedule?.today) selectedDay = today;
+      setHeaderDate(today);
+      renderWeek(lessons, today, weekStart);
+      renders.set('calendar', calendarKey);
+    }
     schedule = { today, lessons };
-    setHeaderDate(today);
-    renderHome(lessons, nextWeekLessons, today);
-    renderWeek(lessons, today, weekStart);
+    const homeKey = JSON.stringify([calendarKey, nextWeekLessons, moscowTimeFormat.format(new Date())]);
+    if (renders.get('schedule-home') !== homeKey) {
+      renderHome(lessons, nextWeekLessons, today);
+      renders.set('schedule-home', homeKey);
+    }
     showScheduleStatus();
     if (activeView === 'home') renderDashboard();
   } catch (error) {
     if (profile !== student) return;
     if (error.status === 401) {
       showLogin('Сессия завершена. Войдите снова.', true);
-    } else {
+    } else if (!quiet || !schedule) {
       showScheduleStatus(error.message, true);
     }
+  } finally {
+    if (scheduleLoad === load) scheduleLoad = undefined;
   }
 }
 
@@ -494,15 +513,59 @@ function renderSection(id, data, draw, force) {
   const focused = document.activeElement;
   const formInUse = root.contains(focused) && focused?.closest('form');
   const dirtyForm = root.querySelector('form[data-dirty]');
-  if (dirtyForm || (!force && (formInUse || root.querySelector('form[aria-busy="true"]')))) return;
+  const editingRequests = id === 'requests-content';
+  if (editingRequests) {
+    if (!force && root.querySelector('form[aria-busy="true"]')) return;
+  } else if (dirtyForm || (!force && (formInUse || root.querySelector('form[aria-busy="true"]')))) {
+    return;
+  }
+  const drafts = editingRequests
+    ? [...root.querySelectorAll('form[data-dirty]')].map((form) => [form.id, [...form.elements]
+      .filter((field) => field.name)
+      .map((field) => [field.name, field.value, field.selectionStart, field.selectionEnd])])
+    : [];
+  if (editingRequests) {
+    for (const note of root.querySelectorAll('[data-unsubmitted-note]')) {
+      drafts.push([note.dataset.unsubmittedNote, [['note', note.textContent]]]);
+    }
+  }
   const focusedId = root.contains(focused) ? focused.id : '';
+  const fallbackFocus = editingRequests && focusedId
+    ? focused.closest('details')?.querySelector('summary')?.id : '';
   const openItems = [...root.querySelectorAll('details[open][id]')].map((item) => item.id);
   root.replaceChildren(...draw(data));
   for (const itemId of openItems) {
     const item = byId(itemId);
     if (item) item.open = true;
   }
-  if (focusedId) byId(focusedId)?.focus({ preventScroll: true });
+  for (const [formId, fields] of drafts) {
+    const form = byId(formId);
+    if (!form) {
+      const details = byId(formId.replace('request-status-', 'request-'));
+      const note = fields.find(([name]) => name === 'note')?.[1];
+      if (details && note) {
+        const text = element('p', 'record-copy', note);
+        text.dataset.unsubmittedNote = formId;
+        details.append(element('h3', 'record-subheading', 'Неотправленный комментарий'), text);
+      }
+      continue;
+    }
+    for (const [name, value, start, end] of fields) {
+      const field = form.elements.namedItem(name);
+      if (!field) continue;
+      if (field.tagName === 'SELECT' && ![...field.options].some((option) => option.value === value)) {
+        field.selectedIndex = -1;
+        continue;
+      }
+      field.value = value;
+      if (Number.isInteger(start)) field.setSelectionRange(start, end);
+    }
+    form.dataset.dirty = '';
+  }
+  if (focusedId) {
+    const target = byId(focusedId) || (fallbackFocus ? byId(fallbackFocus) : null);
+    target?.focus({ preventScroll: true });
+  }
   renders.set(id, signature);
 }
 
@@ -543,8 +606,13 @@ function renderDashboard() {
   const pendingAssignments = cabinet?.assignments.filter((item) => student
     ? !item.submission
     : item.submission?.status === 'submitted').length;
+  const now = Date.now();
+  const deadlines = student ? (cabinet?.assignments ?? [])
+    .filter((item) => !item.submission && new Date(item.dueAt).getTime() >= now)
+    .sort((a, b) => a.dueAt.localeCompare(b.dueAt))
+    .slice(0, 3) : [];
   const recentKey = JSON.stringify([
-    profile.role, schedule?.today, schedule?.lessons, cabinet?.unreadCount, cabinet?.requests, cabinet?.assignments,
+    profile.role, schedule?.today, schedule?.lessons, cabinet?.unreadCount, cabinet?.requests, cabinet?.assignments, deadlines,
   ]);
   if (renders.get('dashboard') === recentKey) return;
   renders.set('dashboard', recentKey);
@@ -564,10 +632,6 @@ function renderDashboard() {
   if (focused?.startsWith('stat-')) byId(focused)?.focus({ preventScroll: true });
 
   if (student) {
-    const deadlines = (cabinet?.assignments ?? [])
-      .filter((item) => !item.submission && new Date(item.dueAt).getTime() >= Date.now())
-      .sort((a, b) => a.dueAt.localeCompare(b.dueAt))
-      .slice(0, 3);
     const deadlinePanel = panel('Ближайшие дедлайны', listFor(deadlines, (item) => {
       const row = element('div', 'record-line');
       const info = element('div');
@@ -609,7 +673,7 @@ function renderGrades(grades) {
       const labels = element('span', 'record-labels');
       labels.append(element('strong', '', item.subject));
       if (profile.role === 'teacher') labels.append(element('span', 'muted', item.studentName));
-      const score = element('span', 'grade-score', item.points + ' / ' + item.maxPoints);
+      const score = element('span', 'grade-score', pointsFormat.format(item.points) + ' / ' + pointsFormat.format(item.maxPoints));
       summary.append(labels, score);
       detail.append(summary);
       const progress = element('progress', 'grade-progress');
@@ -982,6 +1046,7 @@ byId('message-form').addEventListener('submit', (event) => {
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden || !profile || signingOut) return;
+  if (profile.role === 'student') loadSchedule({ quiet: true });
   loadCabinet({ quiet: true });
   if (activeView === 'messages' && selectedDialogue !== undefined) refreshDialogue(true);
 });
