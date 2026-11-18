@@ -1,4 +1,5 @@
 import { crc32, inflateRawSync } from 'node:zlib';
+import { answerFor, documents, faqFor } from './knowledge.mjs';
 
 const PDF = 'application/pdf';
 const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -404,11 +405,12 @@ const searchSections = [
   ['schedule', 'Расписание', ['student']],
   ['grades', 'Успеваемость', ['student', 'teacher'], 'оценки баллы'],
   ['assignments', 'Задания', ['student', 'teacher']],
-  ['requests', 'Справки', ['student', 'dean'], 'заявки'],
+  ['requests', 'Справки и документы', ['student', 'dean'], 'заявки'],
   ['messages', 'Сообщения'],
   ['updates', 'Уведомления'],
   ['contacts', 'Контакты', null, 'преподаватели'],
   ['campus', 'Карта кампуса', null, 'кампус'],
+  ['help', 'Помощник по кабинету', null, 'FAQ частые вопросы'],
   ['profile', 'Профиль'],
 ];
 
@@ -637,6 +639,14 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     for (const [view, title, roles, keywords] of searchSections) {
       if (!roles || roles.includes(role)) add('section', title, view, null, keywords);
     }
+    if (role === 'student') {
+      for (const item of documents) {
+        add('document', item.title, 'requests', 'document-' + item.id, item.description);
+      }
+    }
+    for (const item of faqFor(role)) {
+      add('faq', item.title, 'help', 'faq-' + item.id, ...item.terms);
+    }
     if (role === 'student' || role === 'teacher') {
       for (const grade of grades.all(id, role, id, role)) {
         add('grade', grade.subject, 'grades', `grade-${grade.id}`,
@@ -663,6 +673,7 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
 
   function submitRequest(viewer, _id, body) {
     const type = text(body.type, 'Укажите вид справки', 80);
+    if (!documents.some((item) => item.title === type)) throw new HttpError(400, 'Выберите вид документа из каталога.');
     const createdAt = now();
     const { lastInsertRowid } = createRequest.run(viewer.id, type, createdAt);
     createHistory.run(lastInsertRowid, 'submitted', '', createdAt);
@@ -738,6 +749,7 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
       throw new HttpError(400, 'Не удалось прочитать имя файла.');
     }
     const extension = mediaType === PDF ? '.pdf' : '.docx';
+    // eslint-disable-next-line no-control-regex -- Reject control characters in uploaded filenames.
     if (!filename || filename.length > 180 || /[\u0000-\u001f\u007f/\\]/.test(filename)
       || !filename.trim().toLowerCase().endsWith(extension)) throw new HttpError(400, 'Проверьте имя и расширение файла.');
     const contents = await bytesBody(request, maxUpload);
@@ -856,5 +868,11 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     response.end(result.contents);
   }
 
-  return { match, handle, search };
+  function help({ role }, query) {
+    if (query === null) return { documents: role === 'student' ? documents : [], faq: faqFor(role) };
+    if (query.length > 300) throw new HttpError(400, 'Вопрос должен содержать не более 300 символов.');
+    return answerFor(role, query);
+  }
+
+  return { match, handle, search, help };
 }

@@ -72,7 +72,7 @@ test('student accounts, schedule ownership and session revocation', { timeout: 2
     assert.equal(profile.status, 200);
     assert.equal(profile.headers.get('cache-control'), 'no-store');
     const { profile: student } = await profile.json();
-    assert.deepEqual(Object.keys(student).sort(), ['faculty', 'fullName', 'group', 'program', 'role', 'year']);
+    assert.deepEqual(Object.keys(student).sort(), ['faculty', 'firstName', 'fullName', 'group', 'lastName', 'program', 'role', 'year']);
     const schedule = await request('/api/schedule', { cookie });
     assert.equal(schedule.status, 200);
     const { lessons, nextWeekLessons } = await schedule.json();

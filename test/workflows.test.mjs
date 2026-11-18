@@ -68,7 +68,10 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   const login = async (name, role) => {
     const response = await request('/login', null, { login: name, password: passwords[name] });
     assert.equal(response.status, 200, name);
-    assert.equal((await response.json()).profile.role, role);
+    const { profile } = await response.json();
+    assert.equal(profile.role, role);
+    const initials = { student1: 'НР', student2: 'ДР', teacher1: 'МЛ', dean1: 'ИЯ' };
+    assert.equal(profile.firstName[0] + profile.lastName[0], initials[name]);
     return response.headers.get('set-cookie').split(';')[0];
   };
   const student = await login('student1', 'student');
@@ -80,6 +83,27 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   assert.ok(initial.contacts.length);
   assert.ok(initial.contacts.every(({ email }) => email.endsWith('@example.com')));
   const search = (query, cookie) => expect('/search?q=' + encodeURIComponent(query), cookie);
+  await expect('/help', null, undefined, 401);
+  const { documents, faq } = await expect('/help', student);
+  assert.equal(documents.length, 8);
+  assert.equal(new Set(documents.map(({ title }) => title)).size, 8);
+  assert.ok(faq.length);
+  for (const cookie of [teacher, dean]) {
+    assert.deepEqual((await expect('/help', cookie)).documents, []);
+    assert.ok(!(await search('справ', cookie)).results.some(({ type }) => type === 'document'));
+  }
+  const partial = (await search('справ', student)).results;
+  assert.ok(partial.some(({ type, view }) => type === 'section' && view === 'requests'));
+  assert.ok(partial.filter(({ type }) => type === 'document').length >= 6);
+  assert.ok(partial.some(({ type, view }) => type === 'faq' && view === 'help'));
+  const question = (text) => expect('/help?q=' + encodeURIComponent(text), student);
+  const documentAnswer = await question('Как получить справку об обучении?');
+  assert.equal(documentAnswer.found, true);
+  assert.equal(documentAnswer.answer.target, 'document-enrollment');
+  const unknown = await question('Как варить борщ?');
+  assert.equal(unknown.found, false);
+  assert.equal(unknown.answer.view, 'messages');
+  await expect('/requests', student, { type: 'Справка вне каталога' }, 400);
   assert.ok((await search('Зельеварение', student)).results.some(({ view }) => view === 'grades'));
   assert.deepEqual((await search('Зельеварение', dean)).results, []);
   assert.ok((await search('Карта кампуса', dean)).results.some(({ view }) => view === 'campus'));
@@ -111,6 +135,9 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   const ready = (await cabinet(student)).requests.find(({ id }) => id === application.id);
   assert.equal(ready.status, 'ready');
   assert.ok(ready.history.length >= 3);
+  for (const item of documents.filter(({ title }) => title !== application.type)) {
+    await expect('/requests', student, { type: item.title });
+  }
 
   const dialog = initial.dialogues.find((item) => /деканат/i.test(item.title));
   assert.ok(dialog);
@@ -222,6 +249,7 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   await stop();
   await start();
   const persisted = await cabinet(student);
+  assert.ok(documents.every(({ title }) => persisted.requests.some(({ type }) => type === title)));
   const withdrawn = persisted.appeals.find(({ id }) => id === pending.id);
   assert.equal(withdrawn.status, 'withdrawn');
   assert.ok(withdrawn.withdrawnAt);

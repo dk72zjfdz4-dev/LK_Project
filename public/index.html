@@ -39,13 +39,8 @@
   </main>
 
   <div class="app-shell" id="app" hidden>
-    <header class="mobile-header">
-      <div class="brand"><span class="brand-mark" aria-hidden="true">ЛК</span>Личный кабинет</div>
-      <button class="avatar mobile-avatar" type="button" id="mobile-avatar" aria-label="Открыть меню профиля" aria-haspopup="dialog" aria-controls="mobile-menu" aria-expanded="false"></button>
-    </header>
     <aside class="sidebar">
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true">ЛК</span>
         <span>Личный кабинет<br><span id="brand-role">студента</span></span>
       </div>
       <nav class="primary-nav" aria-label="Разделы кабинета">
@@ -53,11 +48,12 @@
         <a href="#schedule" data-view="schedule"><span class="nav-icon icon-calendar" aria-hidden="true"></span>Расписание</a>
         <a href="#grades" data-view="grades"><span class="nav-icon icon-grades" aria-hidden="true"></span>Успеваемость</a>
         <a href="#assignments" data-view="assignments"><span class="nav-icon icon-sheet" aria-hidden="true"></span>Задания</a>
-        <a href="#requests" data-view="requests"><span class="nav-icon icon-sheet" aria-hidden="true"></span>Справки</a>
+        <a href="#requests" data-view="requests"><span class="nav-icon icon-sheet" aria-hidden="true"></span>Справки и документы</a>
         <a href="#messages" data-view="messages"><span class="nav-icon icon-message" aria-hidden="true"></span>Сообщения<span class="count-badge nav-count" data-unread hidden></span></a>
         <a href="#contacts" data-view="contacts"><span class="nav-icon icon-profile" aria-hidden="true"></span>Контакты</a>
         <a href="#updates" data-view="updates"><span class="nav-icon icon-bell" aria-hidden="true"></span>Уведомления</a>
         <a href="#campus" data-view="campus"><span class="nav-icon icon-calendar" aria-hidden="true"></span>Карта кампуса</a>
+        <a href="#help" data-view="help"><span class="nav-icon icon-message" aria-hidden="true"></span>Помощник по кабинету</a>
         <a href="#profile" data-view="profile"><span class="nav-icon icon-profile" aria-hidden="true"></span>Профиль</a>
       </nav>
       <div class="sidebar-account">
@@ -72,21 +68,28 @@
       </div>
     </aside>
 
+    <header class="app-header">
+      <div class="mobile-header">
+        <button class="avatar mobile-avatar" type="button" id="mobile-avatar" aria-label="Открыть меню профиля" aria-haspopup="dialog" aria-controls="mobile-menu" aria-expanded="false"></button>
+        <span class="brand">Личный кабинет</span>
+      </div>
+      <form class="app-search" id="search-form" role="search">
+        <label class="visually-hidden" for="search-query">Поиск по кабинету</label>
+        <input id="search-query" type="search" placeholder="Поиск" maxlength="100" autocomplete="off" aria-controls="search-results">
+        <button class="button button-secondary" type="submit">Найти</button>
+        <div class="search-results panel" id="search-results" hidden>
+          <p id="search-status" class="muted" role="status"></p>
+          <ul id="search-list"></ul>
+        </div>
+      </form>
+    </header>
+
     <div class="workspace">
       <main class="main-content">
         <header class="page-header">
           <h1 id="page-heading" tabindex="-1">Главная</h1>
           <a class="button button-secondary header-inbox" id="header-inbox" href="#messages"><span class="nav-icon icon-message" aria-hidden="true"></span>Сообщения<span class="count-badge" data-unread>0</span></a>
         </header>
-        <form class="app-search" id="search-form" role="search">
-          <label class="visually-hidden" for="search-query">Поиск по кабинету</label>
-          <input id="search-query" type="search" placeholder="Поиск по кабинету" maxlength="100" autocomplete="off" aria-controls="search-results">
-          <button class="button button-secondary" type="submit">Найти</button>
-          <div class="search-results panel" id="search-results" hidden>
-            <p id="search-status" class="muted" role="status"></p>
-            <ul id="search-list"></ul>
-          </div>
-        </form>
         <p class="app-error" id="app-error" role="alert"></p>
         <div class="schedule-status" id="cabinet-status" hidden>
           <p role="status" id="cabinet-status-text"></p>
@@ -152,8 +155,15 @@
         <section class="view" id="view-assignments" aria-label="Задания и пересмотры оценок" hidden>
           <div class="cabinet-layout" id="assignments-content"></div>
         </section>
-        <section class="view" id="view-requests" aria-label="Заявки на справки" hidden>
-          <div class="cabinet-layout" id="requests-content"></div>
+        <section class="view cabinet-layout" id="view-requests" aria-label="Справки и документы" hidden>
+          <section class="panel document-catalog" id="document-catalog" aria-labelledby="document-catalog-heading" hidden>
+            <h2 id="document-catalog-heading">Виды документов</h2>
+            <p class="muted">Каталог демонстрационный. Действующий перечень документов и условия их получения уточняйте в деканате.</p>
+            <p class="muted" id="document-catalog-status" role="status"></p>
+            <button class="button button-secondary" id="document-catalog-retry" type="button" hidden>Повторить</button>
+            <div id="documents-content"></div>
+          </section>
+          <div id="requests-content"></div>
         </section>
         <section class="view" id="view-messages" aria-label="Переписка" hidden>
           <div class="messaging" id="messaging" hidden>
@@ -186,6 +196,30 @@
           <div class="cabinet-layout" id="updates-content"></div>
         </section>
 
+        <section class="view" id="view-help" aria-label="Помощник по кабинету" hidden>
+          <div class="cabinet-layout">
+            <section class="panel" aria-labelledby="help-question-heading">
+              <h2 id="help-question-heading">Задать вопрос</h2>
+              <p class="muted">Автоматические ответы из FAQ. Вводите вопрос без персональных данных.</p>
+              <form class="cabinet-form" id="help-form">
+                <div class="form-field">
+                  <label for="help-query">Вопрос о кабинете</label>
+                  <input id="help-query" type="text" maxlength="200" placeholder="Например, как загрузить работу?" autocomplete="off" required>
+                </div>
+                <button class="button button-primary" type="submit">Получить ответ</button>
+              </form>
+              <p class="muted" id="help-status" role="status"></p>
+              <div class="help-answer" id="help-answer" aria-live="polite"></div>
+            </section>
+            <section class="panel" aria-labelledby="faq-heading">
+              <h2 id="faq-heading">Частые вопросы</h2>
+              <p class="muted" id="faq-status" role="status"></p>
+              <button class="button button-secondary" id="faq-retry" type="button" hidden>Повторить</button>
+              <div id="faq-content"></div>
+            </section>
+          </div>
+        </section>
+
         <section class="view" id="view-campus" aria-label="Карта кампуса" hidden>
           <div class="cabinet-layout">
             <section class="panel">
@@ -194,18 +228,33 @@
               <a class="button button-primary" href="https://mgimo.ru/territory/">Открыть официальную интерактивную карту</a>
             </section>
             <section class="panel" aria-labelledby="campus-buildings-title">
-              <header class="panel-header"><h2 id="campus-buildings-title">Корпуса на официальной карте</h2></header>
-              <ul class="campus-buildings">
-                <li class="status-badge">Корпус А</li>
-                <li class="status-badge">Корпус Б</li>
-                <li class="status-badge">Корпус В</li>
-                <li class="status-badge">Корпус Г</li>
-                <li class="status-badge" id="campus-building-new">Новый корпус</li>
-              </ul>
+              <header class="panel-header"><h2 id="campus-buildings-title">Условная схема корпусов</h2></header>
+              <p class="muted">Формы и расположение условны. Для навигации на местности используйте официальную карту.</p>
+              <svg class="campus-symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <symbol id="campus-shape-a" viewBox="0 0 112 88"><path d="M14 30h84v30H14z M28 30V18h56v12"/></symbol>
+                <symbol id="campus-shape-b" viewBox="0 0 112 88"><path d="M16 26h52v14h28v26H16z M32 40h20m-20 12h20m24 0h8"/></symbol>
+                <symbol id="campus-shape-v" viewBox="0 0 112 88"><path d="M10 37h29V16h34v21h29v33H10z M47 32h18m-18 11h18m-42 12h12m42 0h12"/></symbol>
+                <symbol id="campus-shape-g" viewBox="0 0 112 88"><path d="M34 12h44v43h17v15H17V55h17z M45 26h22m-22 12h22m-22 12h22"/></symbol>
+                <symbol id="campus-shape-n" viewBox="0 0 112 88"><path d="M15 34h17V21h48v13h17v35H15z M32 47h48M32 58h48 M49 21v48m14-48v48"/></symbol>
+              </svg>
+              <div class="campus-buildings" role="group" aria-labelledby="campus-buildings-title" id="campus-buildings"></div>
+              <section class="campus-card" id="campus-card" aria-labelledby="campus-card-title" hidden>
+                <div class="campus-card-heading">
+                  <h3 id="campus-card-title" tabindex="-1"></h3>
+                  <button class="button button-secondary" id="campus-card-close" type="button">Закрыть</button>
+                </div>
+                <div class="campus-card-content">
+                  <svg class="campus-zoom" viewBox="0 0 112 88" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use id="campus-card-shape"></use></svg>
+                  <div>
+                    <p id="campus-card-description"></p>
+                    <a id="campus-card-source" href="https://mgimo.ru/territory/campus/">Описание корпусов МГИМО</a>
+                  </div>
+                </div>
+              </section>
             </section>
             <section class="panel" aria-labelledby="campus-rooms-title">
-              <header class="panel-header"><h2 id="campus-rooms-title">Найти помещение</h2></header>
-              <p>В справочнике доступен зал 314 по программе конференции 2023 года. Перед посещением сверяйтесь с официальной картой.</p>
+              <header class="panel-header"><h2 id="campus-rooms-title">Поиск помещения</h2></header>
+              <p>Поиск по помещениям из опубликованного описания кампуса. Перед посещением сверяйтесь с официальной картой.</p>
               <form class="cabinet-form" id="campus-room-form" role="search" aria-label="Поиск помещения">
                 <div class="form-field">
                   <label for="campus-room-query">Номер зала или аудитории</label>
@@ -214,7 +263,7 @@
                 <button type="submit" class="button button-primary">Найти</button>
               </form>
               <p id="campus-room-result" role="status"></p>
-              <p class="muted">Аудитории учебного расписания вымышлены. Для расширения справочника нужна актуальная привязка помещений к корпусам и этажам.</p>
+              <p class="muted">Аудитории учебного расписания вымышлены.</p>
             </section>
             <section class="panel">
               <header class="panel-header"><h2>Источники</h2></header>

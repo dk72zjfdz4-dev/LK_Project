@@ -27,8 +27,10 @@ test('an open student cabinet refreshes the schedule through midnight', async ()
   let today = '2026-11-22';
   let shown;
   const node = {};
+  const avatar = {};
   const context = {
-    byId: () => node, profileFields: {}, roleNames: { student: 'Студент' }, roleBrand: {},
+    byId: (id) => id === 'mobile-avatar' ? avatar : node,
+    profileFields: {}, roleNames: { student: 'Студент' }, roleBrand: {},
     route() {}, loadCabinet() {}, selectedDialogue: undefined, activeView: 'home', signingOut: false,
     document: {}, window: { setInterval(callback) { tick = callback; } },
     showScheduleStatus() {}, revealTarget() {}, preservePagePosition(update) { update(); }, renderHome() {}, renderDashboard() {}, lessonOrder() {},
@@ -40,9 +42,10 @@ test('an open student cabinet refreshes the schedule through midnight', async ()
   };
   runInNewContext(section('function showApp(', 'function dateAt(')
     + section('async function loadSchedule(', 'const requestStatuses')
-    + "showApp({role:'student', fullName:'Нюша Романова'});", context);
+    + "showApp({role:'student', fullName:'Нюша Мироновна Романова', firstName:'Нюша', lastName:'Романова'});", context);
   await new Promise(setImmediate);
   assert.equal(shown, today);
+  assert.equal(avatar.textContent, 'НР');
   today = '2026-11-23';
   await tick();
   await new Promise(setImmediate);
@@ -162,28 +165,28 @@ test('composer handles Enter, Shift, IME and duplicate submissions', async () =>
 });
 
 test('campus lookup distinguishes documented rooms from fictional and unverified rooms', () => {
-  let submit;
-  let highlighted;
+  let showBuilding;
   const query = {};
-  const result = {};
+  const result = { append() {} };
   const nodes = {
-    'campus-room-form': { addEventListener(_event, handler) { submit = handler; } },
     'campus-room-query': query,
-    'campus-building-new': { classList: { toggle(_name, value) { highlighted = value; } } },
     'campus-room-result': result,
   };
-  runInNewContext(section("byId('campus-room-form').addEventListener", '\nrestoreSession();'), {
+  const submit = runInNewContext(section('const campusRooms', 'const svgNamespace')
+    + section('function findCampusRoom(', 'for (const [id, building]')
+    + 'findCampusRoom;', {
     byId: (id) => nodes[id],
+    element: () => ({ addEventListener(_event, handler) { showBuilding = handler; } }),
+    openCampusCard: (id) => assert.equal(id, 'n'),
   });
   for (const room of ['  Зал № 314  ', 'ауд. 314']) {
     query.value = room;
     submit({ preventDefault() {} });
-    assert.equal(highlighted, true);
     assert.match(result.textContent, /Новый корпус.*3-й этаж.*2023/);
+    showBuilding();
   }
   query.value = 'А-314';
   submit({ preventDefault() {} });
-  assert.equal(highlighted, false);
   assert.equal(result.textContent, 'Расположение не подтверждено.');
 });
 
@@ -243,4 +246,64 @@ test('demo contact offers clipboard confirmation and manual copying fallback', a
   await button.click();
   assert.equal(copied, email);
   assert.equal(status.textContent, 'Адрес скопирован.');
+});
+
+test('search highlights partial words as text and handles ё/е', () => {
+  const highlight = runInNewContext(section('function highlightSearch(', 'async function runSearch(')
+    + 'highlightSearch;', {
+    element(tag, _className, text) {
+      return { tag, text, parts: [], append(...parts) { this.parts.push(...parts); } };
+    },
+  });
+  const highlighted = highlight('Справки и документы', 'справ');
+  assert.equal(highlighted.parts[1].tag, 'mark');
+  assert.equal(highlighted.parts[1].text, 'Справ');
+  const literal = highlight('<b>Учёт</b>', 'учет');
+  assert.equal(literal.parts[0], '<b>');
+  assert.equal(literal.parts[1].text, 'Учёт');
+  assert.equal(literal.parts[2], '</b>');
+});
+
+test('campus card selects each symbol, closes and returns focus', () => {
+  const nodes = new Map();
+  function byId(id) {
+    if (!nodes.has(id)) nodes.set(id, {
+      attrs: {}, classList: { add() {}, remove() {} },
+      setAttribute(name, value) { this.attrs[name] = value; },
+      focus() { this.focused = true; },
+    });
+    return nodes.get(id);
+  }
+  const { open, close } = runInNewContext(section('const campusBuildings', 'function findCampusRoom(')
+    + '({open: openCampusCard, close: closeCampusCard});', {
+    byId, mobileLayout: { matches: true },
+  });
+  for (const id of ['a', 'b', 'v', 'g', 'n']) {
+    open(id);
+    const button = byId('campus-building-' + id);
+    assert.equal(button.attrs['aria-expanded'], 'true');
+    assert.equal(byId('campus-card-shape').attrs.href, '#campus-shape-' + id);
+    assert.equal(byId('campus-card').hidden, false);
+    close(true);
+    assert.equal(button.attrs['aria-expanded'], 'false');
+    assert.equal(button.focused, true);
+    assert.equal(byId('campus-card').hidden, true);
+  }
+});
+
+test('mobile drawer closes on the backdrop and keeps clicks inside the drawer', () => {
+  let click;
+  let closes = 0;
+  const mobileMenu = {
+    addEventListener(_event, handler) { click = handler; },
+    close() { closes++; },
+    getBoundingClientRect: () => ({ left: 0, top: 0, right: 315, bottom: 700 }),
+  };
+  runInNewContext(section("mobileMenu.addEventListener('click'", "mobileMenu.addEventListener('close'"), { mobileMenu });
+  click({ target: mobileMenu, clientX: 120, clientY: 600 });
+  assert.equal(closes, 0);
+  click({ target: {}, clientX: 340, clientY: 600 });
+  assert.equal(closes, 0);
+  click({ target: mobileMenu, clientX: 340, clientY: 600 });
+  assert.equal(closes, 1);
 });

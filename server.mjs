@@ -28,6 +28,8 @@ const moscowDate = new Intl.DateTimeFormat('en-CA', {
 const demos = [
   {
     login: 'student1',
+    firstName: 'Нюша',
+    lastName: 'Романова',
     passwordEnv: 'DEMO_PASSWORD_1',
     role: 'student',
     profile: ['Алина Воронцова', 'Факультет международных отношений', 'Международные отношения', 2, 'МО-24-02'],
@@ -47,6 +49,8 @@ const demos = [
   },
   {
     login: 'student2',
+    firstName: 'Даниил',
+    lastName: 'Речин',
     passwordEnv: 'DEMO_PASSWORD_2',
     role: 'student',
     profile: ['Даниил Речин', 'Факультет международной экономики', 'Экономика', 3, 'МЭ-23-04'],
@@ -65,6 +69,8 @@ const demos = [
   },
   {
     login: 'teacher1',
+    firstName: 'Мария',
+    lastName: 'Ланская',
     passwordEnv: 'DEMO_PASSWORD_TEACHER',
     role: 'teacher',
     profile: ['Мария Ланская', 'Кафедра практических дисциплин', 'Зельеварение', 0, ''],
@@ -72,6 +78,8 @@ const demos = [
   },
   {
     login: 'dean1',
+    firstName: 'Ирина',
+    lastName: 'Яровая',
     passwordEnv: 'DEMO_PASSWORD_DEAN',
     role: 'dean',
     profile: ['Ирина Яровая', 'Деканат', 'Учебная служба', 0, ''],
@@ -143,7 +151,7 @@ transaction(() => installCabinet(db));
 
 const studentByLogin = db.prepare('SELECT * FROM students WHERE login = ?');
 const profileBySession = db.prepare(`
-  SELECT students.id, full_name, faculty, program, year, student_group, role
+  SELECT students.id, login, full_name, faculty, program, year, student_group, role
   FROM sessions JOIN students ON students.id = sessions.student_id
   WHERE token_hash = ? AND expires_at > ?
 `);
@@ -222,8 +230,11 @@ function seedDemos(reset = false) {
 }
 
 function profile(student) {
+  const demo = demos.find(({ login }) => login === student.login);
   return {
     fullName: student.full_name,
+    firstName: demo?.firstName ?? '',
+    lastName: demo?.lastName ?? '',
     faculty: student.faculty,
     program: student.program,
     year: student.year,
@@ -394,7 +405,7 @@ async function api(request, response, path) {
 
   const lessonPath = /^\/api\/lessons\/([^/]+)$/.exec(path);
   const isReadRoute = method === 'GET'
-    && (path === '/api/me' || path === '/api/schedule' || path === '/api/search' || lessonPath);
+    && (path === '/api/me' || path === '/api/schedule' || path === '/api/search' || path === '/api/help' || lessonPath);
   const cabinetRoute = cabinet.match(method, path);
   if (!isReadRoute && !cabinetRoute) throw new HttpError(404, 'Страница не найдена.');
   const token = sessionHash(request);
@@ -412,6 +423,10 @@ async function api(request, response, path) {
   if (path === '/api/search') {
     const params = new URLSearchParams(request.url.slice(path.length + 1));
     return json(response, 200, cabinet.search(account, params.get('q') ?? ''));
+  }
+  if (path === '/api/help') {
+    const params = new URLSearchParams(request.url.slice(path.length + 1));
+    return json(response, 200, cabinet.help(account, params.get('q')));
   }
   if (account.role !== 'student') throw new HttpError(403, 'Расписание доступно студентам.');
   if (path === '/api/schedule') return json(response, 200, schedule(account.id));

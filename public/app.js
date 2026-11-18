@@ -6,17 +6,18 @@ const views = {
   schedule: 'Расписание',
   grades: 'Успеваемость',
   assignments: 'Задания',
-  requests: 'Справки',
+  requests: 'Справки и документы',
   messages: 'Сообщения',
   contacts: 'Контакты',
   updates: 'Уведомления',
   campus: 'Карта кампуса',
+  help: 'Помощник по кабинету',
   profile: 'Профиль',
 };
 const roleViews = {
   student: Object.keys(views),
-  teacher: ['home', 'grades', 'assignments', 'messages', 'contacts', 'updates', 'campus', 'profile'],
-  dean: ['home', 'requests', 'messages', 'contacts', 'updates', 'campus', 'profile'],
+  teacher: ['home', 'grades', 'assignments', 'messages', 'contacts', 'updates', 'campus', 'help', 'profile'],
+  dean: ['home', 'requests', 'messages', 'contacts', 'updates', 'campus', 'help', 'profile'],
 };
 const roleNames = { student: 'Студент', teacher: 'Преподаватель', dean: 'Деканат' };
 const roleBrand = { student: 'студента', teacher: 'преподавателя', dean: 'деканата' };
@@ -58,6 +59,9 @@ let pendingTarget;
 let drawerDestination;
 let searchTimer;
 let searchLoad;
+let helpCatalog;
+let helpCatalogLoad;
+let helpQuestionLoad;
 let composingMessage = false;
 const messageStates = new Map();
 const renderedMessages = new Map();
@@ -101,6 +105,8 @@ function route(focusHeading = false) {
   const [requested, targetId] = window.location.hash.slice(1).split('/');
   const permitted = roleViews[profile.role];
   const active = permitted.includes(requested) ? requested : 'home';
+  if (active !== 'campus') closeCampusCard();
+  if (activeView === 'help' && active !== 'help') resetHelpQuestion();
   pendingTarget = active === requested && targetId ? targetId : undefined;
   activeView = active;
   byId('app-error').textContent = '';
@@ -120,6 +126,7 @@ function route(focusHeading = false) {
   byId('header-inbox').hidden = active === 'messages';
   document.title = views[active] + ' — Личный кабинет';
   renderCabinet();
+  if (active === 'help' || (active === 'requests' && profile.role === 'student')) loadHelpCatalog();
   const fromDrawer = drawerDestination === window.location.hash;
   drawerDestination = undefined;
   if (focusHeading || pendingTarget) {
@@ -159,6 +166,11 @@ function showLogin(message = '', focusHeading = false) {
   pendingTarget = drawerDestination = undefined;
   composingMessage = false;
   clearSearch();
+  helpCatalog = helpCatalogLoad = undefined;
+  resetHelpQuestion();
+  closeCampusCard();
+  byId('campus-room-form').reset();
+  byId('campus-room-result').textContent = '';
   if (mobileMenu.open) mobileMenu.close();
   document.documentElement.classList.remove('menu-open');
   byId('lesson-dialog').close();
@@ -185,6 +197,7 @@ function showLogin(message = '', focusHeading = false) {
     'week-grid', 'upcoming-lessons', 'changed-lessons', 'home-week', 'home-week-label', 'home-stats',
     'home-cabinet', 'home-staff', 'grades-content', 'assignments-content', 'requests-content',
     'dialogues-content', 'updates-content', 'contacts-content', 'dialogue-contact', 'lesson-dialog-content', 'action-status',
+    'documents-content', 'faq-content', 'document-catalog-status', 'faq-status',
   ]) byId(id).replaceChildren();
   for (const id of [
     ...Object.keys(profileFields),
@@ -204,8 +217,10 @@ function showApp(account, focusHeading = false) {
     fieldNode.textContent = account[field] ?? '';
     if (fieldNode.tagName === 'DD') fieldNode.parentElement.hidden = !account[field];
   }
-  const names = account.fullName.trim().split(/\s+/);
-  const initials = names.slice(0, 2).map((part) => part[0]).join('');
+  const initials = [account.firstName, account.lastName]
+    .map((name) => Array.from(name?.trim() ?? '')[0] ?? '')
+    .join('')
+    .toLocaleUpperCase('ru-RU');
   const roleName = roleNames[profile.role];
   byId('mobile-avatar').textContent = initials;
   byId('mobile-menu-name').textContent = account.fullName;
@@ -213,13 +228,14 @@ function showApp(account, focusHeading = false) {
   byId('sidebar-initials').textContent = initials;
   byId('profile-initials').textContent = initials;
   byId('sidebar-name').textContent = account.fullName;
-  byId('welcome-name').textContent = (profile.role === 'student' ? 'Привет, ' : 'Здравствуйте, ') + names[0] + '!';
+  byId('welcome-name').textContent = (profile.role === 'student' ? 'Привет, ' : 'Здравствуйте, ') + (account.firstName || account.fullName) + '!';
   byId('welcome-summary').textContent = profile.role === 'student'
     ? [account.group, account.year && account.year + ' курс'].filter(Boolean).join(' · ')
     : [roleName, account.faculty].filter(Boolean).join(' · ');
   byId('brand-role').textContent = roleBrand[profile.role];
   byId('profile-role').textContent = roleName;
   byId('sidebar-group').textContent = profile.role === 'student' ? account.group : roleName;
+  byId('document-catalog').hidden = profile.role !== 'student';
   byId('home-status').hidden = true;
   byId('home-schedule').hidden = true;
   byId('session-loading').hidden = true;
@@ -483,7 +499,7 @@ const appealStatuses = {
 };
 const searchTypes = {
   section: 'Раздел', grade: 'Дисциплина', lesson: 'Занятие', assignment: 'Задание',
-  contact: 'Контакт', notification: 'Объявление', request: 'Заявка',
+  contact: 'Контакт', notification: 'Объявление', request: 'Заявка', document: 'Документ', faq: 'Частый вопрос',
 };
 const eventFormat = new Intl.DateTimeFormat('ru-RU', {
   day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow',
@@ -823,7 +839,7 @@ function renderDialogueContact(contact) {
   renders.set('dialogue-contact', signature);
 }
 
-function formFor(id, buttonText, fields, submit, { confirmation } = {}) {
+function formFor(id, buttonText, fields, submit, { confirmation, onSaved } = {}) {
   const form = element('form', 'cabinet-form');
   form.id = id;
   for (const field of fields) {
@@ -861,7 +877,7 @@ function formFor(id, buttonText, fields, submit, { confirmation } = {}) {
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     if (button.disabled || (confirmation && !window.confirm(confirmation))) return;
-    performForm(form, error, submit);
+    performForm(form, error, submit, { onSaved });
   });
   return form;
 }
@@ -910,11 +926,7 @@ async function performForm(form, output, submit, { onSaved, isCurrent = () => tr
 
 function renderRequests(requests) {
   const student = profile.role === 'student';
-  const sections = [];
-  if (student) sections.push(panel('Заказать справку', formFor('new-request', 'Подать заявку', [
-    { name: 'type', label: 'Вид справки', options: [['Справка об обучении', 'Справка об обучении']] },
-  ], (data) => post('/api/requests', { type: data.get('type') }))));
-  sections.push(panel(student ? 'Мои заявки' : 'Заявки студентов', listFor(requests, (item) => {
+  return [panel(student ? 'Мои заявки' : 'Заявки студентов', listFor(requests, (item) => {
     const detail = element('details', 'record-details');
     detail.id = 'request-' + item.id;
     const summary = element('summary', 'record-summary');
@@ -938,8 +950,106 @@ function renderRequests(requests) {
       })));
     }
     return detail;
-  }, 'Заявок пока нет.')));
-  return sections;
+  }, 'Заявок пока нет.'))];
+}
+
+function helpDetails(id, title, ...content) {
+  const details = element('details', 'record-details');
+  details.id = id;
+  const summary = element('summary', 'record-summary');
+  summary.append(element('strong', 'record-labels', title));
+  details.append(summary, ...content);
+  return details;
+}
+
+function renderDocument(item) {
+  const id = 'document-' + item.id;
+  const status = element('p', 'muted document-submit-status');
+  status.setAttribute('role', 'status');
+  const form = formFor(id + '-form', 'Подать заявку', [], () => {
+    status.textContent = '';
+    return post('/api/requests', { type: item.title });
+  }, {
+    onSaved: () => { status.textContent = 'Заявка подана. Статус появится в разделе «Мои заявки».'; },
+  });
+  return helpDetails(id, item.title, element('p', 'record-copy', item.description), form, status);
+}
+
+function answerContent(answer, label) {
+  const text = element('p', 'record-copy', answer.text);
+  if (!roleViews[profile.role].includes(answer.view)) return [text];
+  const hash = '#' + answer.view + (answer.target ? '/' + encodeURIComponent(answer.target) : '');
+  return [text, anchor(hash, 'button button-secondary help-link', label ?? 'Перейти в раздел «' + views[answer.view] + '»')];
+}
+
+async function loadHelpCatalog() {
+  if (!profile || helpCatalog || helpCatalogLoad) return;
+  const account = profile;
+  const load = {};
+  helpCatalogLoad = load;
+  const areas = ['faq', ...(account.role === 'student' ? ['document-catalog'] : [])];
+  for (const area of areas) {
+    byId(area + '-status').textContent = 'Загружаем…';
+    byId(area + '-retry').hidden = true;
+  }
+  const current = () => profile === account && helpCatalogLoad === load;
+  try {
+    const payload = await request('/api/help');
+    if (!current()) return;
+    if (account.role === 'student') {
+      byId('documents-content').replaceChildren(listFor(payload.documents, renderDocument, 'Каталог пока пуст.'));
+    }
+    const faq = listFor(payload.faq, (entry) => helpDetails('faq-' + entry.id, entry.title, ...answerContent(entry)), 'Ответов пока нет.');
+    byId('faq-content').replaceChildren(faq);
+    for (const area of areas) byId(area + '-status').textContent = '';
+    helpCatalog = payload;
+    revealTarget();
+  } catch (error) {
+    if (!current() || endSession(error)) return;
+    for (const area of areas) {
+      byId(area + '-status').textContent = error.message;
+      byId(area + '-retry').hidden = false;
+    }
+  } finally {
+    if (helpCatalogLoad === load) helpCatalogLoad = undefined;
+  }
+}
+
+function clearHelpAnswer() {
+  helpQuestionLoad?.controller.abort();
+  helpQuestionLoad = undefined;
+  byId('help-status').textContent = '';
+  byId('help-answer').replaceChildren();
+}
+
+function resetHelpQuestion() {
+  byId('help-form').reset();
+  clearHelpAnswer();
+}
+
+async function askHelp(event) {
+  event.preventDefault();
+  const account = profile;
+  const query = byId('help-query').value.trim();
+  clearHelpAnswer();
+  if (!account || !query) return;
+  const load = { controller: new AbortController() };
+  helpQuestionLoad = load;
+  byId('help-status').textContent = 'Ищем ответ…';
+  const current = () => profile === account && helpQuestionLoad === load && activeView === 'help';
+  try {
+    const { answer, found } = await request('/api/help?q=' + encodeURIComponent(query), { signal: load.controller.signal });
+    if (!current()) return;
+    byId('help-status').textContent = '';
+    byId('help-answer').replaceChildren(
+      element('h3', '', answer.title),
+      ...answerContent(answer, !found && account.role === 'student' ? 'Написать в деканат' : undefined),
+    );
+  } catch (error) {
+    if (current() && !endSession(error)) byId('help-status').textContent = error.message;
+  } finally {
+    if (helpQuestionLoad === load) helpQuestionLoad = undefined;
+  }
 }
 
 const docxType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -1337,6 +1447,25 @@ function scheduleSearch(delay) {
   searchTimer = window.setTimeout(() => runSearch(query, account, load), delay);
 }
 
+function highlightSearch(title, query) {
+  const label = element('span');
+  const words = [...new Set(query.normalize('NFC').toLowerCase().replaceAll('ё', 'е').split(/\s+/).filter(Boolean))];
+  if (!words.length) {
+    label.textContent = title;
+    return label;
+  }
+  words.sort((a, b) => b.length - a.length);
+  const expression = words.map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replaceAll('е', '[её]')).join('|');
+  const text = title.normalize('NFC');
+  let start = 0;
+  for (const match of text.matchAll(new RegExp(expression, 'giu'))) {
+    label.append(text.slice(start, match.index), element('mark', 'search-match', match[0]));
+    start = match.index + match[0].length;
+  }
+  label.append(text.slice(start));
+  return label;
+}
+
 async function runSearch(query, account, load) {
   const current = () => profile === account && searchLoad === load;
   try {
@@ -1347,7 +1476,7 @@ async function runSearch(query, account, load) {
       const row = element('li');
       const hash = '#' + item.view + (item.id ? '/' + item.id : '');
       const link = anchor(hash, 'search-result');
-      link.append(element('span', '', item.title), element('span', 'muted', searchTypes[item.type] ?? 'Результат'));
+      link.append(highlightSearch(item.title, query), element('span', 'muted', searchTypes[item.type] ?? 'Результат'));
       link.addEventListener('click', (event) => {
         if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
@@ -1399,6 +1528,16 @@ byId('search-form').addEventListener('keydown', (event) => {
     byId('search-query').focus();
   }
 });
+document.addEventListener('pointerdown', (event) => {
+  if (!byId('search-results').hidden && !byId('search-form').contains(event.target)) clearSearch();
+});
+byId('search-form').addEventListener('focusout', (event) => {
+  if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) clearSearch();
+});
+byId('document-catalog-retry').addEventListener('click', loadHelpCatalog);
+byId('faq-retry').addEventListener('click', loadHelpCatalog);
+byId('help-form').addEventListener('submit', askHelp);
+byId('help-query').addEventListener('input', clearHelpAnswer);
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden || !profile || signingOut) return;
@@ -1477,7 +1616,11 @@ mobileNav.addEventListener('click', (event) => {
   }
 });
 mobileMenu.addEventListener('click', (event) => {
-  if (event.target === mobileMenu) mobileMenu.close();
+  if (event.target !== mobileMenu) return;
+  const { left, top, right, bottom } = mobileMenu.getBoundingClientRect();
+  if (event.clientX < left || event.clientX >= right || event.clientY < top || event.clientY >= bottom) {
+    mobileMenu.close();
+  }
 });
 mobileMenu.addEventListener('close', () => {
   mobileAvatar.setAttribute('aria-expanded', 'false');
@@ -1512,14 +1655,88 @@ async function restoreSession() {
   }
 }
 
-byId('campus-room-form').addEventListener('submit', (event) => {
+const campusBuildings = {
+  a: { title: 'Корпус А', description: 'Два этажа. В корпусе находится конференц-зал МГИМО.' },
+  b: { title: 'Корпус Б', description: 'Четыре этажа и цоколь. Здесь находится лекционный зал № 7.' },
+  v: { title: 'Корпус В', description: 'Основное здание, четыре этажа и цоколь. Залы 1 и 2 находятся на первом этаже, залы 3–6 — на четвёртом.' },
+  g: { title: 'Корпус Г', description: 'Шесть этажей и цоколь. На шестом этаже работает телестудия.' },
+  n: { title: 'Корпус Н', description: 'Новый корпус, пять этажей. Залы 215 и 216 находятся на втором этаже, залы 314 и 315 — на третьем.' },
+};
+const campusRooms = { 215: 2, 216: 2, 314: 3, 315: 3 };
+const svgNamespace = 'http://www.w3.org/2000/svg';
+let selectedBuilding;
+
+function campusSymbol(id) {
+  const svg = document.createElementNS(svgNamespace, 'svg');
+  svg.setAttribute('viewBox', '0 0 112 88');
+  svg.setAttribute('aria-hidden', 'true');
+  const shape = document.createElementNS(svgNamespace, 'use');
+  shape.setAttribute('href', '#campus-shape-' + id);
+  svg.append(shape);
+  return svg;
+}
+
+function openCampusCard(id, focusHeading = true) {
+  closeCampusCard();
+  selectedBuilding = byId('campus-building-' + id);
+  selectedBuilding.setAttribute('aria-expanded', 'true');
+  const { title, description } = campusBuildings[id];
+  const heading = byId('campus-card-title');
+  heading.textContent = title;
+  byId('campus-card-description').textContent = description;
+  byId('campus-card-shape').setAttribute('href', '#campus-shape-' + id);
+  byId('campus-card').hidden = false;
+  byId('view-campus').classList.add('campus-card-open');
+  if (focusHeading) {
+    heading.focus({ preventScroll: true });
+    if (!mobileLayout.matches) heading.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function closeCampusCard(restoreFocus = false) {
+  if (!selectedBuilding) return;
+  selectedBuilding.setAttribute('aria-expanded', 'false');
+  byId('campus-card').hidden = true;
+  byId('view-campus').classList.remove('campus-card-open');
+  if (restoreFocus) selectedBuilding.focus({ preventScroll: true });
+  selectedBuilding = undefined;
+}
+
+function findCampusRoom(event) {
   event.preventDefault();
   const query = byId('campus-room-query').value.trim().toLocaleLowerCase('ru-RU');
-  const knownRoom = /^(?:(?:зал|ауд(?:итория)?\.?)\s*)?(?:№\s*)?314$/.test(query);
-  byId('campus-building-new').classList.toggle('status-ready', knownRoom);
-  byId('campus-room-result').textContent = knownRoom
-    ? 'Зал 314. Новый корпус, 3-й этаж по программе 2023 года.'
-    : 'Расположение не подтверждено.';
+  const room = /^(?:(?:зал|ауд(?:итория)?\.?)\s*)?(?:№\s*)?(\d+)$/.exec(query)?.[1];
+  const floor = campusRooms[room];
+  const output = byId('campus-room-result');
+  if (!floor) {
+    output.textContent = 'Расположение не подтверждено.';
+    return;
+  }
+  output.textContent = 'Зал ' + room + '. Новый корпус, ' + floor + '-й этаж.' +
+    (room === '314' ? ' Также указан в программе конференции 2023 года.' : '');
+  const link = element('button', 'button button-secondary campus-room-building', 'Показать корпус Н');
+  link.type = 'button';
+  link.addEventListener('click', () => openCampusCard('n'));
+  output.append(' ', link);
+}
+
+for (const [id, building] of Object.entries(campusBuildings)) {
+  const button = element('button', 'campus-building');
+  button.type = 'button';
+  button.id = 'campus-building-' + id;
+  button.setAttribute('aria-controls', 'campus-card');
+  button.setAttribute('aria-expanded', 'false');
+  button.append(campusSymbol(id), element('span', '', building.title));
+  button.addEventListener('click', () => openCampusCard(id));
+  byId('campus-buildings').append(button);
+}
+byId('campus-card-close').addEventListener('click', () => closeCampusCard(true));
+byId('campus-room-form').addEventListener('submit', findCampusRoom);
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !event.defaultPrevented && activeView === 'campus' && selectedBuilding &&
+      !document.querySelector('dialog[open]')) {
+    closeCampusCard(true);
+  }
 });
 
 restoreSession();
