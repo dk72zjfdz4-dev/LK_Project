@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#172947">
+  <title>Личный кабинет</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="loading-screen" id="session-loading">
+    <p role="status">Проверяем вход…</p>
+  </div>
+
+  <main class="login-layout" id="login-screen" hidden>
+    <div class="login-cover">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">ЛК</span>
+        <span>Личный кабинет<br>студента</span>
+      </div>
+      <div class="cover-art" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>
+      <p class="prototype-notice">Конкурсный прототип. Неофициальный сервис</p>
+    </div>
+    <section class="login-main" aria-labelledby="login-heading">
+      <div class="login-panel">
+        <h1 id="login-heading" tabindex="-1">Вход в кабинет</h1>
+        <p class="login-intro">Введите логин и пароль демо-аккаунта.</p>
+        <form id="login-form" method="post" action="/api/login">
+          <label for="login">Логин</label>
+          <input id="login" name="login" autocomplete="username" autocapitalize="none" spellcheck="false" aria-describedby="login-hint" required>
+          <p class="input-hint" id="login-hint">Демо-логины студентов — student1 и student2. Для сотрудников — teacher1 и dean1.</p>
+          <label for="password">Пароль</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required>
+          <p class="form-error" id="login-error" role="alert"></p>
+          <button class="button button-primary" type="submit">Войти</button>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <div class="app-shell" id="app" hidden>
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">ЛК</span>
+        <span>Личный кабинет<br><span id="brand-role">студента</span></span>
+      </div>
+      <nav class="primary-nav" aria-label="Разделы кабинета">
+        <a href="#home" data-view="home"><span class="nav-icon icon-home" aria-hidden="true"></span>Главная</a>
+        <a href="#schedule" data-view="schedule"><span class="nav-icon icon-calendar" aria-hidden="true"></span>Расписание</a>
+        <a href="#grades" data-view="grades"><span class="nav-icon icon-grades" aria-hidden="true"></span>Успеваемость</a>
+        <a href="#assignments" data-view="assignments"><span class="nav-icon icon-sheet" aria-hidden="true"></span>Задания</a>
+        <a href="#requests" data-view="requests"><span class="nav-icon icon-sheet" aria-hidden="true"></span>Справки</a>
+        <a href="#messages" data-view="messages"><span class="nav-icon icon-message" aria-hidden="true"></span>Сообщения<span class="count-badge nav-count" data-unread hidden></span></a>
+        <a href="#updates" data-view="updates"><span class="nav-icon icon-bell" aria-hidden="true"></span>Уведомления</a>
+        <a href="#profile" data-view="profile"><span class="nav-icon icon-profile" aria-hidden="true"></span>Профиль</a>
+      </nav>
+      <div class="sidebar-account">
+        <div class="sidebar-person">
+          <span class="avatar" id="sidebar-initials" aria-hidden="true"></span>
+          <div>
+            <span class="sidebar-name" id="sidebar-name"></span>
+            <span class="sidebar-group" id="sidebar-group"></span>
+          </div>
+        </div>
+        <button class="logout-button" id="logout" type="button">Выйти</button>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <main class="main-content">
+        <header class="page-header">
+          <h1 id="page-heading" tabindex="-1">Главная</h1>
+          <div class="header-actions">
+            <time id="header-date" hidden></time>
+            <a class="button button-secondary header-inbox" href="#messages"><span class="nav-icon icon-message" aria-hidden="true"></span>Сообщения<span class="count-badge" data-unread>0</span></a>
+          </div>
+        </header>
+        <p class="app-error" id="app-error" role="alert"></p>
+        <div class="schedule-status" id="cabinet-status" hidden>
+          <p role="status" id="cabinet-status-text"></p>
+          <button type="button" class="button button-secondary" id="cabinet-retry" hidden>Повторить</button>
+        </div>
+        <p class="visually-hidden" id="action-status" role="status"></p>
+
+        <section class="view" id="view-home" aria-label="Обзор учебного дня">
+          <div class="welcome">
+            <div><h2 id="welcome-name"></h2><p id="welcome-summary"></p></div>
+          </div>
+          <div class="home-stats" id="home-stats" hidden></div>
+          <div class="schedule-status" id="home-status">
+            <p role="status" data-status></p>
+            <button type="button" class="button button-secondary" data-schedule-retry hidden>Повторить</button>
+          </div>
+          <div class="home-grid" id="home-schedule" hidden>
+            <section class="panel home-calendar" data-student-schedule>
+              <div class="panel-heading">
+                <h2>Учебная неделя</h2>
+                <span class="muted" id="home-week-label"></span>
+              </div>
+              <div class="mini-week" id="home-week"></div>
+            </section>
+            <div id="home-cabinet" class="home-module"></div>
+            <section class="panel" data-student-schedule>
+              <div class="panel-heading">
+                <h2>Ближайшие занятия</h2>
+                <a class="inline-link" href="#schedule">Всё расписание <span aria-hidden="true">→</span></a>
+              </div>
+              <div id="upcoming-lessons"></div>
+            </section>
+            <section class="panel" data-student-schedule>
+              <div class="panel-heading">
+                <h2>Изменения на неделе</h2>
+              </div>
+              <div id="changed-lessons"></div>
+            </section>
+          </div>
+          <div id="home-staff" class="home-grid" hidden></div>
+        </section>
+
+        <section class="view" id="view-schedule" aria-label="Расписание на неделю" hidden>
+          <div class="schedule-status" id="week-status">
+            <p role="status" data-status></p>
+            <button type="button" class="button button-secondary" data-schedule-retry hidden>Повторить</button>
+          </div>
+          <div id="week-schedule" hidden>
+            <div class="week-heading">
+              <h2 id="week-label"></h2>
+              <span>Время по Москве</span>
+            </div>
+            <fieldset class="day-picker" id="day-picker">
+              <legend class="visually-hidden">Выберите день недели</legend>
+            </fieldset>
+            <div class="week-grid" id="week-grid"></div>
+          </div>
+        </section>
+
+        <section class="view" id="view-grades" aria-label="Успеваемость" hidden>
+          <div class="cabinet-layout" id="grades-content"></div>
+        </section>
+        <section class="view" id="view-assignments" aria-label="Задания и пересмотры оценок" hidden>
+          <div class="cabinet-layout" id="assignments-content"></div>
+        </section>
+        <section class="view" id="view-requests" aria-label="Заявки на справки" hidden>
+          <div class="cabinet-layout" id="requests-content"></div>
+        </section>
+        <section class="view" id="view-messages" aria-label="Переписка" hidden>
+          <div class="messaging" id="messaging" hidden>
+            <section class="panel dialogue-panel" aria-labelledby="dialogues-heading">
+              <h2 id="dialogues-heading">Диалоги</h2>
+              <div class="dialogue-list" id="dialogues-content"></div>
+            </section>
+            <section class="panel conversation" aria-labelledby="dialogue-heading">
+              <h2 id="dialogue-heading" tabindex="-1">Переписка</h2>
+              <p class="local-error" id="dialogue-error" role="alert"></p>
+              <div id="messages-content"><p class="empty-state">Выберите диалог.</p></div>
+              <form class="cabinet-form message-form" id="message-form" hidden>
+                <label for="message-text">Сообщение</label>
+                <textarea id="message-text" name="text" rows="2" maxlength="2000" required></textarea>
+                <button class="button button-primary" id="message-submit" type="submit">Отправить</button>
+              </form>
+            </section>
+          </div>
+        </section>
+        <section class="view" id="view-updates" aria-label="Системные уведомления" hidden>
+          <div class="cabinet-layout" id="updates-content"></div>
+        </section>
+
+        <section class="view" id="view-profile" aria-label="Профиль" hidden>
+          <div class="panel profile">
+            <div class="profile-heading">
+              <span class="avatar" id="profile-initials" aria-hidden="true"></span>
+              <div>
+                <h2 id="profile-name"></h2>
+                <p id="profile-role"></p>
+              </div>
+            </div>
+            <dl class="profile-details">
+              <div><dt>ФИО</dt><dd id="profile-full-name"></dd></div>
+              <div><dt>Факультет</dt><dd id="profile-faculty"></dd></div>
+              <div><dt>Направление</dt><dd id="profile-program"></dd></div>
+              <div><dt>Курс</dt><dd id="profile-year"></dd></div>
+              <div><dt>Группа</dt><dd id="profile-group"></dd></div>
+            </dl>
+          </div>
+        </section>
+      </main>
+
+      <footer class="app-footer prototype-notice">Конкурсный прототип. Неофициальный сервис</footer>
+    </div>
+  </div>
+  <dialog class="lesson-dialog panel" id="lesson-dialog" aria-labelledby="lesson-dialog-heading">
+    <div class="panel-heading">
+      <h2 id="lesson-dialog-heading">Занятие</h2>
+      <form method="dialog"><button class="button button-secondary" type="submit" autofocus>Закрыть</button></form>
+    </div>
+    <div id="lesson-dialog-content" aria-live="polite"></div>
+  </dialog>
+</body>
+</html>

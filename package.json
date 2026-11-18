@@ -1,0 +1,13 @@
+{
+  "name": "student-cabinet-prototype",
+  "private": true,
+  "version": "0.1.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "build": "node --check server.mjs && node --check cabinet.mjs && node --check public/app.js",
+    "test": "node --test"
+  }
+}
