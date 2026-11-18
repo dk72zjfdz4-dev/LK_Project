@@ -8,13 +8,15 @@ const views = {
   assignments: 'Задания',
   requests: 'Справки',
   messages: 'Сообщения',
+  contacts: 'Контакты',
   updates: 'Уведомления',
+  campus: 'Карта кампуса',
   profile: 'Профиль',
 };
 const roleViews = {
   student: Object.keys(views),
-  teacher: ['home', 'grades', 'assignments', 'messages', 'updates', 'profile'],
-  dean: ['home', 'requests', 'messages', 'updates', 'profile'],
+  teacher: ['home', 'grades', 'assignments', 'messages', 'contacts', 'updates', 'campus', 'profile'],
+  dean: ['home', 'requests', 'messages', 'contacts', 'updates', 'campus', 'profile'],
 };
 const roleNames = { student: 'Студент', teacher: 'Преподаватель', dean: 'Деканат' };
 const roleBrand = { student: 'студента', teacher: 'преподавателя', dean: 'деканата' };
@@ -52,7 +54,22 @@ let selectedDay;
 let selectedDialogue;
 let dialogueLoad;
 let lessonOpen;
+let pendingTarget;
+let drawerDestination;
+let searchTimer;
+let searchLoad;
+let composingMessage = false;
+const messageStates = new Map();
+const renderedMessages = new Map();
 const renders = new Map();
+
+const mobileMenu = byId('mobile-menu');
+const mobileAvatar = byId('mobile-avatar');
+const messageText = byId('message-text');
+const messageForm = byId('message-form');
+const emojiOptions = byId('emoji-options');
+const emojiToggle = byId('emoji-toggle');
+const mobileLayout = window.matchMedia('(max-width: 680px)');
 
 function element(tag, className, content) {
   const node = document.createElement(tag);
@@ -81,9 +98,10 @@ async function request(path, options) {
 }
 
 function route(focusHeading = false) {
-  const requested = window.location.hash.slice(1);
+  const [requested, targetId] = window.location.hash.slice(1).split('/');
   const permitted = roleViews[profile.role];
   const active = permitted.includes(requested) ? requested : 'home';
+  pendingTarget = active === requested && targetId ? targetId : undefined;
   activeView = active;
   byId('app-error').textContent = '';
   for (const name of Object.keys(views)) {
@@ -99,13 +117,36 @@ function route(focusHeading = false) {
   }
   const heading = byId('page-heading');
   heading.textContent = views[active];
+  byId('header-inbox').hidden = active === 'messages';
   document.title = views[active] + ' — Личный кабинет';
   renderCabinet();
-  if (focusHeading) {
+  const fromDrawer = drawerDestination === window.location.hash;
+  drawerDestination = undefined;
+  if (focusHeading || pendingTarget) {
     window.scrollTo(0, 0);
-    heading.focus({ preventScroll: true });
+    if (!fromDrawer) heading.focus({ preventScroll: true });
   }
+  revealTarget();
   if (active === 'messages' && selectedDialogue !== undefined) refreshDialogue();
+}
+
+function revealTarget() {
+  if (!pendingTarget) return;
+  const target = byId(pendingTarget);
+  if (!target || !byId('view-' + activeView).contains(target)) return;
+  pendingTarget = undefined;
+  if (target.tagName === 'DETAILS') target.open = true;
+  const day = target.closest('.calendar-day');
+  if (day) selectDay(day.dataset.date);
+  const focus = target.querySelector('summary, button, [tabindex="-1"]') || target;
+  focus.focus({ preventScroll: true });
+  focus.scrollIntoView({ block: 'nearest' });
+}
+
+function preservePagePosition(update) {
+  const position = window.scrollY;
+  update();
+  if (window.scrollY !== position) window.scrollTo(0, position);
 }
 
 function showLogin(message = '', focusHeading = false) {
@@ -113,6 +154,13 @@ function showLogin(message = '', focusHeading = false) {
   schedule = scheduleLoad = cabinet = cabinetLoad = selectedDay = selectedDialogue = dialogueLoad = lessonOpen = undefined;
   window.clearInterval(pollTimer);
   renders.clear();
+  messageStates.clear();
+  renderedMessages.clear();
+  pendingTarget = drawerDestination = undefined;
+  composingMessage = false;
+  clearSearch();
+  if (mobileMenu.open) mobileMenu.close();
+  document.documentElement.classList.remove('menu-open');
   byId('lesson-dialog').close();
   byId('session-loading').hidden = true;
   byId('app').hidden = true;
@@ -120,13 +168,14 @@ function showLogin(message = '', focusHeading = false) {
   byId('login-form').reset();
   byId('login-error').textContent = message;
   byId('app-error').textContent = '';
-  byId('header-date').hidden = true;
   byId('cabinet-status').hidden = true;
   byId('home-stats').hidden = true;
   byId('home-staff').hidden = true;
   byId('messaging').hidden = true;
-  byId('message-form').hidden = true;
-  byId('message-form').reset();
+  messageForm.hidden = true;
+  messageForm.reset();
+  syncComposer();
+  setEmojiPanel(false);
   byId('dialogue-heading').textContent = 'Переписка';
   byId('dialogue-error').textContent = '';
   byId('messages-content').replaceChildren(element('p', 'empty-state', 'Выберите диалог.'));
@@ -135,11 +184,12 @@ function showLogin(message = '', focusHeading = false) {
   for (const id of [
     'week-grid', 'upcoming-lessons', 'changed-lessons', 'home-week', 'home-week-label', 'home-stats',
     'home-cabinet', 'home-staff', 'grades-content', 'assignments-content', 'requests-content',
-    'dialogues-content', 'updates-content', 'lesson-dialog-content', 'action-status',
+    'dialogues-content', 'updates-content', 'contacts-content', 'dialogue-contact', 'lesson-dialog-content', 'action-status',
   ]) byId(id).replaceChildren();
   for (const id of [
     ...Object.keys(profileFields),
     'sidebar-name', 'sidebar-initials', 'profile-initials', 'welcome-name', 'welcome-summary',
+    'mobile-avatar', 'mobile-menu-name', 'mobile-menu-role', 'mobile-logout-error',
   ]) {
     byId(id).textContent = '';
   }
@@ -157,6 +207,9 @@ function showApp(account, focusHeading = false) {
   const names = account.fullName.trim().split(/\s+/);
   const initials = names.slice(0, 2).map((part) => part[0]).join('');
   const roleName = roleNames[profile.role];
+  byId('mobile-avatar').textContent = initials;
+  byId('mobile-menu-name').textContent = account.fullName;
+  byId('mobile-menu-role').textContent = roleName;
   byId('sidebar-initials').textContent = initials;
   byId('profile-initials').textContent = initials;
   byId('sidebar-name').textContent = account.fullName;
@@ -167,7 +220,6 @@ function showApp(account, focusHeading = false) {
   byId('brand-role').textContent = roleBrand[profile.role];
   byId('profile-role').textContent = roleName;
   byId('sidebar-group').textContent = profile.role === 'student' ? account.group : roleName;
-  setHeaderDate(new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Moscow' }).format(new Date()));
   byId('home-status').hidden = true;
   byId('home-schedule').hidden = true;
   byId('session-loading').hidden = true;
@@ -200,7 +252,7 @@ function lessonTimes(lesson) {
 function lessonDetails(lesson) {
   const details = element('div', 'lesson-details');
   details.append(
-    element('span', 'lesson-room', 'Ауд. ' + lesson.room),
+    element('span', 'lesson-room', 'Демо-ауд. ' + lesson.room),
     element('span', 'lesson-teacher', lesson.teacher),
   );
   return details;
@@ -228,6 +280,7 @@ async function openLesson(id) {
     if (!dialog.open || lessonOpen !== load || profile !== load.account) return;
     byId('lesson-dialog-heading').textContent = lesson.title;
     content.replaceChildren(element('p', 'muted', dateFormat.format(dateAt(lesson.date)) + ' · ' + lessonTimes(lesson)), lessonDetails(lesson));
+    if (lesson.contact) content.append(contactCard(lesson.contact));
     if (lesson.change || lesson.cancelled) content.append(element('p', 'change-label', lesson.change || 'Занятие отменено.'));
   } catch (error) {
     if (profile !== load.account || lessonOpen !== load) return;
@@ -313,6 +366,7 @@ function calendarDay(date, day, today, lessons) {
   column.append(header);
   renderList(column.appendChild(element('div', 'day-lessons')), lessons, (lesson) => {
     const card = element('li', 'calendar-card');
+    card.id = 'lesson-' + lesson.id;
     card.append(
       element('p', 'lesson-time', lessonTimes(lesson)),
       lessonTitle(lesson, 'h4'),
@@ -363,19 +417,16 @@ function renderWeek(lessons, today, start) {
   selectDay(isoDates.includes(selectedDay) ? selectedDay : active);
 }
 
-function setHeaderDate(today) {
-  const headerDate = byId('header-date');
-  headerDate.dateTime = today;
-  headerDate.textContent = dayFormat.format(dateAt(today));
-  headerDate.hidden = false;
-}
-
 function showScheduleStatus(message = '', canRetry = false) {
   for (const [status, ...contents] of scheduleAreas) {
-    status.hidden = !message;
-    for (const content of contents) content.hidden = Boolean(message);
-    status.querySelector('[data-status]').textContent = message;
-    status.querySelector('[data-schedule-retry]').hidden = !canRetry;
+    if (status.hidden !== !message) status.hidden = !message;
+    for (const content of contents) {
+      if (content.hidden !== Boolean(message)) content.hidden = Boolean(message);
+    }
+    const label = status.querySelector('[data-status]');
+    if (label.textContent !== message) label.textContent = message;
+    const retry = status.querySelector('[data-schedule-retry]');
+    if (retry.hidden !== !canRetry) retry.hidden = !canRetry;
   }
 }
 
@@ -389,21 +440,27 @@ async function loadSchedule({ quiet = false } = {}) {
     const { today, weekStart, lessons, nextWeekLessons = [] } = await request('/api/schedule');
     if (profile !== student) return;
     lessons.sort(lessonOrder);
-    const calendarKey = JSON.stringify([today, weekStart, lessons]);
-    if (renders.get('calendar') !== calendarKey) {
-      if (selectedDay === schedule?.today) selectedDay = today;
-      setHeaderDate(today);
-      renderWeek(lessons, today, weekStart);
-      renders.set('calendar', calendarKey);
-    }
-    schedule = { today, lessons };
-    const homeKey = JSON.stringify([calendarKey, nextWeekLessons, moscowTimeFormat.format(new Date())]);
-    if (renders.get('schedule-home') !== homeKey) {
-      renderHome(lessons, nextWeekLessons, today);
-      renders.set('schedule-home', homeKey);
-    }
-    showScheduleStatus();
-    if (activeView === 'home') renderDashboard();
+    const update = () => {
+      const calendarKey = JSON.stringify([today, weekStart, lessons]);
+      if (renders.get('calendar') !== calendarKey) {
+        if (selectedDay === schedule?.today) selectedDay = today;
+        renderWeek(lessons, today, weekStart);
+        renders.set('calendar', calendarKey);
+      }
+      schedule = { today, lessons };
+      const now = moscowTimeFormat.format(new Date());
+      const ended = lessons.filter((lesson) => lesson.date === today && !lesson.cancelled && lesson.end <= now).length;
+      const homeKey = JSON.stringify([calendarKey, nextWeekLessons, ended]);
+      if (renders.get('schedule-home') !== homeKey) {
+        renderHome(lessons, nextWeekLessons, today);
+        renders.set('schedule-home', homeKey);
+      }
+      showScheduleStatus();
+      if (activeView === 'home') renderDashboard();
+    };
+    if (quiet) preservePagePosition(update);
+    else update();
+    revealTarget();
   } catch (error) {
     if (profile !== student) return;
     if (error.status === 401) {
@@ -418,6 +475,15 @@ async function loadSchedule({ quiet = false } = {}) {
 
 const requestStatuses = {
   submitted: 'Подана', processing: 'В обработке', ready: 'Готова', rejected: 'Отклонена',
+};
+const appealStatuses = {
+  pending: ['На рассмотрении', 'processing'],
+  decided: ['Решение принято', 'ready'],
+  withdrawn: ['Отозвано', 'withdrawn'],
+};
+const searchTypes = {
+  section: 'Раздел', grade: 'Дисциплина', lesson: 'Занятие', assignment: 'Задание',
+  contact: 'Контакт', notification: 'Объявление', request: 'Заявка',
 };
 const eventFormat = new Intl.DateTimeFormat('ru-RU', {
   day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow',
@@ -448,16 +514,22 @@ function post(path, data) {
 }
 
 function showCabinetStatus(message = '', retry = false) {
-  byId('cabinet-status').hidden = !message;
-  byId('cabinet-status-text').textContent = message;
-  byId('cabinet-retry').hidden = !retry;
+  const status = byId('cabinet-status');
+  const text = byId('cabinet-status-text');
+  const button = byId('cabinet-retry');
+  if (status.hidden !== !message) status.hidden = !message;
+  if (text.textContent !== message) text.textContent = message;
+  if (button.hidden !== !retry) button.hidden = !retry;
 }
 
 function updateUnread(count) {
   for (const badge of document.querySelectorAll('[data-unread]')) {
-    badge.hidden = !count && badge.classList.contains('nav-count');
-    badge.textContent = count;
-    badge.setAttribute('aria-label', 'Непрочитанных сообщений: ' + count);
+    const hidden = !count && badge.classList.contains('nav-count');
+    if (badge.hidden !== hidden) badge.hidden = hidden;
+    if (badge.textContent !== String(count) || !badge.hasAttribute('aria-label')) {
+      badge.textContent = count;
+      badge.setAttribute('aria-label', 'Непрочитанных сообщений: ' + count);
+    }
   }
 }
 
@@ -471,9 +543,14 @@ async function loadCabinet({ quiet = false, fresh = false, refreshView, afterRen
     const payload = await request('/api/cabinet');
     if (profile !== account || cabinetLoad !== load) return;
     cabinet = payload;
-    showCabinetStatus();
-    updateUnread(cabinet.unreadCount);
-    renderCabinet(refreshView === activeView);
+    const update = () => {
+      showCabinetStatus();
+      updateUnread(cabinet.unreadCount);
+      renderCabinet(refreshView === activeView);
+    };
+    if (quiet) preservePagePosition(update);
+    else update();
+    revealTarget();
     afterRender?.();
   } catch (error) {
     if (profile !== account || cabinetLoad !== load || endSession(error)) return;
@@ -499,6 +576,10 @@ function renderCabinet(force = false) {
     case 'messages':
       byId('messaging').hidden = false;
       renderSection('dialogues-content', cabinet.dialogues, renderDialogues, force);
+      renderDialogueContact(cabinet.dialogues.find((item) => item.id === selectedDialogue)?.contact);
+      break;
+    case 'contacts':
+      renderSection('contacts-content', cabinet.contacts ?? [], renderContacts, force);
       break;
     case 'updates':
       renderSection('updates-content', cabinet.notifications, renderUpdates, force);
@@ -517,6 +598,7 @@ function renderSection(id, data, draw, force) {
   if (editingRequests) {
     if (!force && root.querySelector('form[aria-busy="true"]')) return;
   } else if (dirtyForm || (!force && (formInUse || root.querySelector('form[aria-busy="true"]')))) {
+    if (id === 'assignments-content') reconcileClosedAppeals(data[1], data[2]);
     return;
   }
   const drafts = editingRequests
@@ -704,7 +786,44 @@ function statusBadge(text, status) {
   return element('span', 'status-badge status-' + status, text);
 }
 
-function formFor(id, buttonText, fields, submit) {
+function contactCard(contact, withId = false) {
+  const card = element('article', 'contact-card');
+  if (withId) card.id = 'contact-' + contact.id;
+  const name = element('h3', 'lesson-title', contact.name);
+  name.tabIndex = -1;
+  const address = element('p', 'contact-address', contact.email);
+  const actions = element('div', 'contact-actions');
+  const copy = element('button', 'button button-secondary', 'Скопировать');
+  copy.type = 'button';
+  copy.setAttribute('aria-label', 'Скопировать почту ' + contact.name);
+  const status = element('p', 'muted');
+  status.setAttribute('role', 'status');
+  copy.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(contact.email);
+      status.textContent = 'Адрес скопирован.';
+    } catch {
+      status.textContent = 'Выделите и скопируйте адрес вручную.';
+    }
+  });
+  const mail = anchor('mailto:' + contact.email, 'inline-link', 'Написать письмо');
+  actions.append(copy, mail);
+  card.append(name, element('p', 'muted', 'Демо-адрес'), address, actions, status);
+  return card;
+}
+
+function renderContacts(contacts) {
+  return [panel('Преподаватели', listFor(contacts, (contact) => contactCard(contact, true), 'Доступных контактов пока нет.'))];
+}
+
+function renderDialogueContact(contact) {
+  const signature = JSON.stringify(contact ?? null);
+  if (renders.get('dialogue-contact') === signature) return;
+  byId('dialogue-contact').replaceChildren(...(contact ? [contactCard(contact)] : []));
+  renders.set('dialogue-contact', signature);
+}
+
+function formFor(id, buttonText, fields, submit, { confirmation } = {}) {
   const form = element('form', 'cabinet-form');
   form.id = id;
   for (const field of fields) {
@@ -741,6 +860,7 @@ function formFor(id, buttonText, fields, submit) {
   form.addEventListener('input', () => { form.dataset.dirty = ''; });
   form.addEventListener('submit', (event) => {
     event.preventDefault();
+    if (button.disabled || (confirmation && !window.confirm(confirmation))) return;
     performForm(form, error, submit);
   });
   return form;
@@ -907,37 +1027,67 @@ function renderAssignments([grades, assignments, appeals]) {
     return detail;
   }, 'Заданий пока нет.')));
 
-  sections.push(panel('Пересмотры оценок', listFor(appeals, (item) => {
-    const assignment = assignmentsBySubmission.get(item.submissionId);
-    const detail = element('details', 'record-details');
-    detail.id = 'appeal-' + item.id;
-    const summary = element('summary', 'record-summary');
-    summary.id = detail.id + '-summary';
-    const labels = element('span', 'record-labels');
-    labels.append(element('strong', '', item.title), element('span', 'muted', [
-      !student && assignment?.studentName, eventTime(item.createdAt),
-    ].filter(Boolean).join(' · ')));
-    summary.append(labels, item.status === 'pending' ? statusBadge('На рассмотрении', 'processing') : statusBadge('Решение принято', 'ready'));
-    detail.append(summary, metadata([
-      ['Запрос подан', eventTime(item.createdAt)],
-      ['Причина', item.reason],
-      ['Исходные баллы', item.oldPoints],
-      ['Итоговые баллы', item.status === 'decided' ? item.newPoints ?? item.oldPoints : null],
-      ['Решение принято', eventTime(item.decidedAt)],
-      ['Ответ преподавателя', item.comment],
-    ]));
-    if (!student && item.status === 'pending') {
-      detail.append(formFor('appeal-decision-' + item.id, 'Сохранить решение', [
-        { name: 'comment', label: 'Ответ студенту', rows: 3, maxLength: 1500 },
-        { name: 'points', label: 'Новые баллы (необязательно)', type: 'number', min: 0, max: assignment?.maxPoints, step: 'any', required: false },
-      ], (data) => post(resource('/api/appeals', item.id, '/decision'), {
-        comment: data.get('comment').trim(),
-        points: data.get('points') === '' ? null : Number(data.get('points')),
-      })));
-    }
-    return detail;
-  }, 'Запросов на пересмотр пока нет.')));
+  sections.push(panel('Пересмотры оценок', listFor(appeals, (item) => (
+    renderAppeal(item, assignmentsBySubmission.get(item.submissionId), student)
+  ), 'Запросов на пересмотр пока нет.')));
   return sections;
+}
+
+function reconcileClosedAppeals(assignments, appeals) {
+  for (const appeal of appeals) {
+    if (appeal.status !== 'withdrawn' && appeal.status !== 'decided') continue;
+    const detail = byId('appeal-' + appeal.id);
+    if (!detail?.querySelector('form')) continue;
+    const focused = detail.contains(document.activeElement);
+    const assignment = assignments.find((item) => item.submission?.id === appeal.submissionId);
+    const replacement = renderAppeal(appeal, assignment, profile.role === 'student');
+    replacement.open = detail.open;
+    detail.replaceWith(replacement);
+    if (focused) replacement.querySelector('summary').focus({ preventScroll: true });
+  }
+}
+
+function renderAppeal(item, assignment, student) {
+  const detail = element('details', 'record-details');
+  detail.id = 'appeal-' + item.id;
+  const summary = element('summary', 'record-summary');
+  summary.id = detail.id + '-summary';
+  const labels = element('span', 'record-labels');
+  labels.append(element('strong', '', item.title), element('span', 'muted', [
+    !student && assignment?.studentName, eventTime(item.createdAt),
+  ].filter(Boolean).join(' · ')));
+  summary.append(labels, statusBadge(...(appealStatuses[item.status] ?? [item.status, 'submitted'])));
+  detail.append(summary, metadata([
+    ['Запрос подан', eventTime(item.createdAt)],
+    ['Причина', item.reason],
+    ['Исходные баллы', item.oldPoints],
+    ['Итоговые баллы', item.status === 'decided' ? item.newPoints ?? item.oldPoints : null],
+    ['Решение принято', eventTime(item.decidedAt)],
+    ['Отозвано', eventTime(item.withdrawnAt)],
+    ['Ответ преподавателя', item.comment],
+  ]));
+  if (item.history?.length) {
+    detail.append(element('h3', 'record-subheading', 'История обращения'), listFor(item.history, (event) => {
+      const row = element('p', 'record-copy');
+      row.append(element('strong', '', appealStatuses[event.status]?.[0] ?? event.status), ' · ' + eventTime(event.createdAt));
+      return row;
+    }, ''));
+  }
+  if (student && item.status === 'pending') {
+    detail.append(formFor('appeal-withdraw-' + item.id, 'Отозвать обращение', [],
+      () => post(resource('/api/appeals', item.id, '/withdraw'), {}),
+      { confirmation: 'Отозвать обращение по оценке? Текущие баллы сохранятся.' }));
+  }
+  if (!student && item.status === 'pending') {
+    detail.append(formFor('appeal-decision-' + item.id, 'Сохранить решение', [
+      { name: 'comment', label: 'Ответ студенту', rows: 3, maxLength: 1500 },
+      { name: 'points', label: 'Новые баллы (необязательно)', type: 'number', min: 0, max: assignment?.maxPoints, step: 'any', required: false },
+    ], (data) => post(resource('/api/appeals', item.id, '/decision'), {
+      comment: data.get('comment').trim(),
+      points: data.get('points') === '' ? null : Number(data.get('points')),
+    })));
+  }
+  return detail;
 }
 
 function renderDialogues(dialogues) {
@@ -972,11 +1122,59 @@ function openDialogue(item) {
   byId('dialogue-heading').textContent = item.title;
   byId('dialogue-heading').focus();
   byId('dialogue-error').textContent = '';
-  byId('message-form').reset();
-  byId('message-form').hidden = false;
+  renderDialogueContact(item.contact);
+  composingMessage = false;
+  syncComposer();
+  setEmojiPanel(false);
+  messageForm.hidden = false;
   byId('messages-content').replaceChildren(element('p', 'empty-state', 'Загружаем переписку…'));
+  renderedMessages.clear();
   renders.delete('messages');
   refreshDialogue(false, true);
+}
+
+function renderDialogueMessages(messages, content) {
+  if (!messages.length) {
+    content.replaceChildren(element('p', 'empty-state', 'В этом диалоге ещё нет сообщений.'));
+    renderedMessages.clear();
+    return;
+  }
+  let list = content.firstElementChild;
+  if (list?.tagName !== 'UL') {
+    list = element('ul', 'record-list');
+    content.replaceChildren(list);
+  }
+  let next = list.firstElementChild;
+  for (const item of messages) {
+    let entry = renderedMessages.get(item.id);
+    if (!entry) {
+      const row = element('li', 'record-row');
+      const message = element('article', 'message ' + (item.mine ? 'message-mine' : 'message-other'));
+      const label = element('div', 'message-label');
+      const sentAt = element('time', 'muted', eventTime(item.createdAt));
+      sentAt.dateTime = item.createdAt;
+      label.append(element('strong', '', item.sender), sentAt);
+      message.append(label, element('p', 'record-copy', item.text));
+      const receipt = item.mine ? element('p', 'message-receipt muted') : null;
+      if (receipt) message.append(receipt);
+      row.append(message);
+      entry = { row, receipt };
+      renderedMessages.set(item.id, entry);
+      row.dataset.messageId = item.id;
+    }
+    if (entry.receipt && entry.read !== item.read) {
+      entry.receipt.textContent = item.read ? 'Прочитано' : 'Отправлено';
+      entry.read = item.read;
+    }
+    if (entry.row !== next) list.insertBefore(entry.row, next);
+    next = entry.row.nextElementSibling;
+  }
+  while (next) {
+    const stale = next;
+    next = next.nextElementSibling;
+    renderedMessages.delete(Number(stale.dataset.messageId));
+    stale.remove();
+  }
 }
 
 async function refreshDialogue(quiet = false, fresh = false) {
@@ -990,22 +1188,25 @@ async function refreshDialogue(quiet = false, fresh = false) {
     const { messages } = await request(resource('/api/dialogues', id));
     if (!current()) return;
     const signature = JSON.stringify(messages);
-    const updated = renders.get('messages') !== signature;
-    if (updated) {
-      const list = listFor(messages, (item) => {
-        const message = element('article', 'message ' + (item.mine ? 'message-mine' : 'message-other'));
-        const label = element('div', 'message-label');
-        const sentAt = element('time', 'muted', eventTime(item.createdAt));
-        sentAt.dateTime = item.createdAt;
-        label.append(element('strong', '', item.sender), sentAt);
-        message.append(label, element('p', 'record-copy', item.text));
-        if (item.mine) message.append(element('p', 'message-receipt muted', item.read ? 'Прочитано' : 'Отправлено'));
-        return message;
-      }, 'В этом диалоге ещё нет сообщений.');
-      byId('messages-content').replaceChildren(list);
+    const content = byId('messages-content');
+    const latestId = messages.at(-1)?.id;
+    const hasNewMessages = renders.has('messages') && latestId !== undefined && !renderedMessages.has(latestId);
+    let atEnd = false;
+    if (hasNewMessages) {
+      const bounds = content.getBoundingClientRect();
+      atEnd = bounds.top < window.innerHeight && bounds.bottom <= window.innerHeight + 48;
+    }
+    const state = messageStates.get(id);
+    if (renders.get('messages') !== signature) {
+      renderDialogueMessages(messages, content);
       renders.set('messages', signature);
     }
-    byId('dialogue-error').textContent = '';
+    if (state?.scrollOnRefresh || (atEnd && hasNewMessages)) {
+      if (state) state.scrollOnRefresh = false;
+      messageForm.scrollIntoView({ block: 'nearest' });
+    }
+    const errorOutput = byId('dialogue-error');
+    if (errorOutput.textContent) errorOutput.textContent = '';
     if (messages.some((message) => !message.mine && !message.read)) {
       await post(resource('/api/dialogues', id, '/read'), { throughId: messages.at(-1).id });
       if (current()) loadCabinet({ quiet: true, fresh: true });
@@ -1020,8 +1221,11 @@ async function refreshDialogue(quiet = false, fresh = false) {
 function renderUpdates(updates) {
   return [panel('Системные уведомления', listFor(updates, (item) => {
     const update = element('article', 'record-line');
+    update.id = 'notice-' + item.id;
     const body = element('div');
-    body.append(element('h3', 'lesson-title', item.title), element('p', 'record-copy', item.text));
+    const heading = element('h3', 'lesson-title', item.title);
+    heading.tabIndex = -1;
+    body.append(heading, element('p', 'record-copy', item.text));
     const createdAt = element('time', 'muted', eventTime(item.createdAt));
     createdAt.dateTime = item.createdAt;
     update.append(body, createdAt);
@@ -1029,19 +1233,171 @@ function renderUpdates(updates) {
   }, 'Уведомлений пока нет.'))];
 }
 
-byId('cabinet-retry').addEventListener('click', () => loadCabinet({ fresh: true }));
-byId('message-form').addEventListener('submit', (event) => {
+function syncComposer() {
+  const state = messageStates.get(selectedDialogue);
+  const value = state?.text ?? '';
+  if (messageText.value !== value) messageText.value = value;
+  const button = byId('message-submit');
+  button.disabled = Boolean(state?.sending);
+  button.textContent = state?.sending ? 'Отправляем…' : state?.error ? 'Повторить отправку' : 'Отправить';
+  byId('message-error').textContent = state?.error ?? '';
+  if (state?.sending) messageForm.setAttribute('aria-busy', 'true');
+  else messageForm.removeAttribute('aria-busy');
+}
+
+function updateDraft() {
+  const state = messageStates.get(selectedDialogue) ?? {};
+  state.text = messageText.value;
+  if (state.error) {
+    state.error = '';
+    syncComposer();
+  }
+  messageStates.set(selectedDialogue, state);
+}
+
+function handleMessageKey(event) {
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing || composingMessage || event.keyCode === 229) return;
   event.preventDefault();
+  if (messageText.value.trim() && !messageStates.get(selectedDialogue)?.sending) messageForm.requestSubmit();
+}
+
+async function sendMessage(event) {
+  event.preventDefault();
+  const account = profile;
   const id = selectedDialogue;
-  if (id === undefined) return;
-  performForm(event.currentTarget, byId('dialogue-error'), (data) => {
-    const text = data.get('text').trim();
-    if (!text) throw new Error('Введите сообщение.');
-    return post(resource('/api/dialogues', id, '/messages'), { text });
-  }, {
-    isCurrent: () => selectedDialogue === id,
-    onSaved: () => refreshDialogue(false, true),
-  });
+  const text = messageText.value.trim();
+  const state = messageStates.get(id) ?? {};
+  if (!account || signingOut || id === undefined || activeView !== 'messages' || composingMessage || state.sending || !text) return;
+  const draft = messageText.value;
+  const current = () => profile === account && selectedDialogue === id;
+  state.text = draft;
+  state.error = '';
+  state.sending = true;
+  messageStates.set(id, state);
+  syncComposer();
+  try {
+    await post(resource('/api/dialogues', id, '/messages'), { text });
+    if (profile !== account) return;
+    if (state.text === draft) state.text = '';
+    if (current() && activeView === 'messages') {
+      state.scrollOnRefresh = true;
+      refreshDialogue(false, true);
+    }
+    byId('action-status').textContent = 'Сообщение отправлено.';
+    loadCabinet({ quiet: true, fresh: true });
+  } catch (error) {
+    if (profile === account && !endSession(error)) state.error = error.message;
+  } finally {
+    state.sending = false;
+    if (current()) syncComposer();
+  }
+}
+
+function setEmojiPanel(open) {
+  emojiOptions.hidden = !open;
+  emojiToggle.setAttribute('aria-expanded', String(open));
+}
+
+function chooseEmoji(emoji) {
+  const start = messageText.selectionStart;
+  const end = messageText.selectionEnd;
+  if (composingMessage || messageText.value.length - (end - start) + emoji.length > messageText.maxLength) return;
+  messageText.setRangeText(emoji, start, end, 'end');
+  updateDraft();
+  messageText.focus({ preventScroll: true });
+  setEmojiPanel(false);
+}
+
+function clearSearch() {
+  window.clearTimeout(searchTimer);
+  searchLoad?.controller.abort();
+  searchLoad = undefined;
+  byId('search-query').value = '';
+  byId('search-results').hidden = true;
+  byId('search-status').textContent = '';
+  byId('search-list').replaceChildren();
+}
+
+function scheduleSearch(delay) {
+  window.clearTimeout(searchTimer);
+  searchLoad?.controller.abort();
+  searchLoad = undefined;
+  const query = byId('search-query').value.trim();
+  const account = profile;
+  if (!query || !account) {
+    byId('search-results').hidden = true;
+    byId('search-list').replaceChildren();
+    return;
+  }
+  byId('search-results').hidden = false;
+  byId('search-status').textContent = 'Ищем…';
+  byId('search-list').replaceChildren();
+  const load = { controller: new AbortController() };
+  searchLoad = load;
+  searchTimer = window.setTimeout(() => runSearch(query, account, load), delay);
+}
+
+async function runSearch(query, account, load) {
+  const current = () => profile === account && searchLoad === load;
+  try {
+    const { results } = await request('/api/search?q=' + encodeURIComponent(query), { signal: load.controller.signal });
+    if (!current()) return;
+    const matching = results.filter((item) => roleViews[account.role].includes(item.view));
+    for (const item of matching) {
+      const row = element('li');
+      const hash = '#' + item.view + (item.id ? '/' + item.id : '');
+      const link = anchor(hash, 'search-result');
+      link.append(element('span', '', item.title), element('span', 'muted', searchTypes[item.type] ?? 'Результат'));
+      link.addEventListener('click', (event) => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        clearSearch();
+        if (window.location.hash === hash) route(true);
+        else window.location.hash = hash;
+      });
+      row.append(link);
+      byId('search-list').append(row);
+    }
+    byId('search-status').textContent = matching.length ? 'Найдено: ' + matching.length : 'Ничего не найдено.';
+  } catch (error) {
+    if (current() && !endSession(error)) byId('search-status').textContent = 'Поиск недоступен. Попробуйте ещё раз.';
+  } finally {
+    if (searchLoad === load) searchLoad = undefined;
+  }
+}
+
+byId('cabinet-retry').addEventListener('click', () => loadCabinet({ fresh: true }));
+messageForm.addEventListener('submit', sendMessage);
+messageText.addEventListener('keydown', handleMessageKey);
+messageText.addEventListener('input', updateDraft);
+messageText.addEventListener('compositionstart', () => { composingMessage = true; });
+messageText.addEventListener('compositionend', () => { composingMessage = false; });
+for (const [emoji, label] of [['🙂', 'Улыбка'], ['👍', 'Палец вверх'], ['👋', 'Привет'], ['🙏', 'Спасибо'], ['🎉', 'Праздник'], ['✅', 'Готово'], ['❤️', 'Сердце'], ['🤔', 'Задумчивость']]) {
+  const button = element('button', 'emoji-button', emoji);
+  button.type = 'button';
+  button.setAttribute('aria-label', label);
+  button.addEventListener('click', () => chooseEmoji(emoji));
+  emojiOptions.append(button);
+}
+emojiToggle.addEventListener('click', () => setEmojiPanel(emojiOptions.hidden));
+messageForm.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !emojiOptions.hidden) {
+    setEmojiPanel(false);
+    emojiToggle.focus();
+  }
+});
+
+byId('search-query').addEventListener('input', () => scheduleSearch(250));
+byId('search-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  scheduleSearch(0);
+});
+byId('search-form').addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !byId('search-results').hidden) {
+    event.preventDefault();
+    clearSearch();
+    byId('search-query').focus();
+  }
 });
 
 document.addEventListener('visibilitychange', () => {
@@ -1075,12 +1431,14 @@ byId('login-form').addEventListener('submit', async (event) => {
   }
 });
 
-byId('logout').addEventListener('click', async (event) => {
+async function logout() {
   if (signingOut) return;
-  const button = event.currentTarget;
+  const buttons = [byId('logout'), byId('mobile-logout')];
+  const mobileError = byId('mobile-logout-error');
   signingOut = true;
-  button.disabled = true;
+  for (const button of buttons) button.disabled = true;
   byId('app-error').textContent = '';
+  mobileError.textContent = '';
   try {
     await request('/api/logout', { method: 'POST' });
     history.replaceState(null, '', window.location.pathname + window.location.search);
@@ -1089,12 +1447,48 @@ byId('logout').addEventListener('click', async (event) => {
     if (error.status === 401) {
       showLogin('', true);
     } else {
-      byId('app-error').textContent = error.message;
+      (mobileMenu.open ? mobileError : byId('app-error')).textContent = error.message;
     }
   } finally {
     signingOut = false;
-    button.disabled = false;
+    for (const button of buttons) button.disabled = false;
   }
+}
+
+byId('logout').addEventListener('click', logout);
+byId('mobile-logout').addEventListener('click', logout);
+
+const mobileNav = byId('mobile-nav');
+mobileNav.append(...[...document.querySelectorAll('.sidebar [data-view]')].map((link) => link.cloneNode(true)));
+mobileAvatar.addEventListener('click', () => {
+  if (!profile || mobileMenu.open || !mobileLayout.matches) return;
+  mobileMenu.showModal();
+  mobileAvatar.setAttribute('aria-expanded', 'true');
+  document.documentElement.classList.add('menu-open');
+});
+mobileNav.addEventListener('click', (event) => {
+  const link = event.target.closest('a[data-view]');
+  if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  mobileMenu.close();
+  if (window.location.hash !== link.hash) {
+    drawerDestination = link.hash;
+    window.location.hash = link.hash;
+  }
+});
+mobileMenu.addEventListener('click', (event) => {
+  if (event.target === mobileMenu) mobileMenu.close();
+});
+mobileMenu.addEventListener('close', () => {
+  mobileAvatar.setAttribute('aria-expanded', 'false');
+  document.documentElement.classList.remove('menu-open');
+  if (profile && mobileLayout.matches) mobileAvatar.focus({ preventScroll: true });
+  if (profile && !mobileLayout.matches) {
+    document.querySelector('.sidebar [aria-current="page"]')?.focus({ preventScroll: true });
+  }
+});
+mobileLayout.addEventListener('change', (event) => {
+  if (!event.matches && mobileMenu.open) mobileMenu.close();
 });
 
 byId('day-picker').addEventListener('change', (event) => selectDay(event.target.value));
@@ -1103,7 +1497,10 @@ for (const button of document.querySelectorAll('[data-schedule-retry]')) {
 }
 
 window.addEventListener('hashchange', () => {
-  if (profile) route(true);
+  if (profile) {
+    clearSearch();
+    route(true);
+  }
 });
 
 async function restoreSession() {
@@ -1114,5 +1511,15 @@ async function restoreSession() {
     showLogin(error.status === 401 ? '' : error.message);
   }
 }
+
+byId('campus-room-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const query = byId('campus-room-query').value.trim().toLocaleLowerCase('ru-RU');
+  const knownRoom = /^(?:(?:зал|ауд(?:итория)?\.?)\s*)?(?:№\s*)?314$/.test(query);
+  byId('campus-building-new').classList.toggle('status-ready', knownRoom);
+  byId('campus-room-result').textContent = knownRoom
+    ? 'Зал 314. Новый корпус, 3-й этаж по программе 2023 года.'
+    : 'Расположение не подтверждено.';
+});
 
 restoreSession();

@@ -6,7 +6,7 @@ import { basename, dirname, relative, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { createCabinet, installCabinet, seedCabinet } from './cabinet.mjs';
+import { createCabinet, demoContact, installCabinet, seedCabinet } from './cabinet.mjs';
 
 const root = realpathSync(fileURLToPath(new URL('.', import.meta.url)));
 const publicDirectory = realpathSync(resolve(root, 'public'));
@@ -249,6 +249,7 @@ function lessonOn(row, date, cancellation) {
     start: row.start_time, end: row.end_time,
     title: row.title, room: row.room, teacher: row.teacher,
     change: cancellation ?? row.change, cancelled: Boolean(cancellation),
+    contact: demoContact(row.teacher),
   };
 }
 
@@ -392,9 +393,10 @@ async function api(request, response, path) {
   }
 
   const lessonPath = /^\/api\/lessons\/([^/]+)$/.exec(path);
-  const isOriginalRoute = method === 'GET' && (path === '/api/me' || path === '/api/schedule' || lessonPath);
+  const isReadRoute = method === 'GET'
+    && (path === '/api/me' || path === '/api/schedule' || path === '/api/search' || lessonPath);
   const cabinetRoute = cabinet.match(method, path);
-  if (!isOriginalRoute && !cabinetRoute) throw new HttpError(404, 'Страница не найдена.');
+  if (!isReadRoute && !cabinetRoute) throw new HttpError(404, 'Страница не найдена.');
   const token = sessionHash(request);
   function authenticate() {
     const account = token ? profileBySession.get(token, Date.now()) : null;
@@ -407,6 +409,10 @@ async function api(request, response, path) {
     return cabinet.handle(cabinetRoute, request, response, account, authenticate);
   }
   if (path === '/api/me') return json(response, 200, { profile: profile(account) });
+  if (path === '/api/search') {
+    const params = new URLSearchParams(request.url.slice(path.length + 1));
+    return json(response, 200, cabinet.search(account, params.get('q') ?? ''));
+  }
   if (account.role !== 'student') throw new HttpError(403, 'Расписание доступно студентам.');
   if (path === '/api/schedule') return json(response, 200, schedule(account.id));
 

@@ -31,7 +31,7 @@ test('an open student cabinet refreshes the schedule through midnight', async ()
     byId: () => node, profileFields: {}, roleNames: { student: 'Студент' }, roleBrand: {},
     route() {}, loadCabinet() {}, selectedDialogue: undefined, activeView: 'home', signingOut: false,
     document: {}, window: { setInterval(callback) { tick = callback; } },
-    showScheduleStatus() {}, renderHome() {}, renderDashboard() {}, lessonOrder() {},
+    showScheduleStatus() {}, revealTarget() {}, preservePagePosition(update) { update(); }, renderHome() {}, renderDashboard() {}, lessonOrder() {},
     renderWeek: (_lessons, date) => { shown = date; },
     setHeaderDate() {}, moscowTimeFormat: { format: () => "00:05" },
     request: async () => ({ today, weekStart: today, lessons: [] }),
@@ -109,4 +109,138 @@ test('grade rendering displays fractional results without floating-point tails',
     },
   });
   assert.equal(score, '48,02 / 100,5');
+});
+
+test('composer handles Enter, Shift, IME and duplicate submissions', async () => {
+  const messageText = { value: '', selectionStart: 2, selectionEnd: 2, maxLength: 2000 };
+  const messageStates = new Map();
+  let submits = 0;
+  let requests = 0;
+  let reject;
+  const pending = new Promise((_resolve, fail) => { reject = fail; });
+  const source = section('function syncComposer(', 'function clearSearch(');
+  const { key, send, emoji } = runInNewContext(source
+    + '({ key: handleMessageKey, send: sendMessage, emoji: chooseEmoji });', {
+    messageText, messageStates, composingMessage: false,
+    messageForm: { requestSubmit() { submits++; }, setAttribute() {}, removeAttribute() {} },
+    selectedDialogue: 7, profile: {}, activeView: 'messages', signingOut: false,
+    byId: () => ({}), post: () => { requests++; return pending; },
+    resource: () => '/api/dialogues/7/messages', endSession: () => false,
+    emojiOptions: {}, emojiToggle: { setAttribute() {} },
+  });
+  const enter = (flags = {}) => {
+    let prevented = false;
+    key({ key: 'Enter', ...flags, preventDefault() { prevented = true; } });
+    return prevented;
+  };
+  assert.equal(enter(), true);
+  assert.equal(submits, 0);
+  messageText.value = 'До после';
+  messageText.setRangeText = (value, start, end) => {
+    messageText.value = messageText.value.slice(0, start) + value + messageText.value.slice(end);
+  };
+  messageText.focus = () => {};
+  emoji('🙂');
+  assert.equal(messageText.value, 'До🙂 после');
+  assert.equal(enter({ shiftKey: true }), false);
+  assert.equal(enter({ isComposing: true }), false);
+  assert.equal(enter({ keyCode: 229 }), false);
+  assert.equal(enter(), true);
+  assert.equal(submits, 1);
+
+  const event = { preventDefault() {} };
+  const first = send(event);
+  assert.equal(enter(), true);
+  assert.equal(submits, 1);
+  await send(event);
+  assert.equal(requests, 1);
+  reject(new Error('Сеть недоступна'));
+  await first;
+  assert.equal(messageText.value, 'До🙂 после');
+  assert.equal(messageStates.get(7).error, 'Сеть недоступна');
+  assert.equal(messageStates.get(7).sending, false);
+});
+
+test('campus lookup distinguishes documented rooms from fictional and unverified rooms', () => {
+  let submit;
+  let highlighted;
+  const query = {};
+  const result = {};
+  const nodes = {
+    'campus-room-form': { addEventListener(_event, handler) { submit = handler; } },
+    'campus-room-query': query,
+    'campus-building-new': { classList: { toggle(_name, value) { highlighted = value; } } },
+    'campus-room-result': result,
+  };
+  runInNewContext(section("byId('campus-room-form').addEventListener", '\nrestoreSession();'), {
+    byId: (id) => nodes[id],
+  });
+  for (const room of ['  Зал № 314  ', 'ауд. 314']) {
+    query.value = room;
+    submit({ preventDefault() {} });
+    assert.equal(highlighted, true);
+    assert.match(result.textContent, /Новый корпус.*3-й этаж.*2023/);
+  }
+  query.value = 'А-314';
+  submit({ preventDefault() {} });
+  assert.equal(highlighted, false);
+  assert.equal(result.textContent, 'Расположение не подтверждено.');
+});
+
+test('a withdrawn appeal replaces its stale decision form even with another dirty form', () => {
+  let focused = false;
+  let replacement;
+  const oldCard = {
+    open: true,
+    querySelector: () => ({}),
+    contains: () => true,
+    replaceWith(card) { replacement = card; },
+  };
+  const updatedCard = {
+    querySelector: () => ({ focus() { focused = true; } }),
+  };
+  const document = { activeElement: { closest: () => ({}) } };
+  const root = { contains: () => true, querySelector: () => ({}) };
+  runInNewContext(section('function renderSection(', 'function panel(')
+    + section('function reconcileClosedAppeals(', 'function renderAppeal(')
+    + 'renderSection("assignments-content", [[], [], [{ id: 3, status: "withdrawn" }]], null, false);', {
+    byId: (id) => id === 'assignments-content' ? root : oldCard,
+    renderAppeal: () => updatedCard,
+    renders: new Map(),
+    document,
+    profile: { role: 'teacher' },
+  });
+  assert.equal(replacement, updatedCard);
+  assert.equal(updatedCard.open, true);
+  assert.equal(focused, true);
+});
+
+test('demo contact offers clipboard confirmation and manual copying fallback', async () => {
+  const email = 'maria.lanskaya@example.com';
+  const navigator = {};
+  let copied;
+  function node(textContent = '') {
+    return {
+      textContent, children: [],
+      append(...children) { this.children.push(...children); },
+      setAttribute() {},
+      addEventListener(_type, listener) { this.click = listener; },
+    };
+  }
+  const card = runInNewContext(section('function contactCard(', 'function renderContacts(')
+    + 'contactCard({ name: "Мария Ланская", email });', {
+    email, navigator, element: (_tag, _className, text) => node(text),
+    anchor: (href) => ({ href }),
+  });
+  const [, label, address, actions, status] = card.children;
+  const [button, mail] = actions.children;
+  assert.equal(label.textContent, 'Демо-адрес');
+  assert.equal(address.textContent, email);
+  assert.equal(mail.href, 'mailto:' + email);
+  await button.click();
+  assert.match(status.textContent, /вручную/);
+  navigator.clipboard = { async writeText(value) { copied = value; } };
+  await button.click();
+  assert.equal(copied, email);
+  assert.equal(status.textContent, 'Адрес скопирован.');
 });

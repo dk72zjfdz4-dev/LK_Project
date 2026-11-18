@@ -77,6 +77,14 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   const dean = await login('dean1', 'dean');
   const cabinet = (cookie) => expect('/cabinet', cookie);
   const initial = await cabinet(student);
+  assert.ok(initial.contacts.length);
+  assert.ok(initial.contacts.every(({ email }) => email.endsWith('@example.com')));
+  const search = (query, cookie) => expect('/search?q=' + encodeURIComponent(query), cookie);
+  assert.ok((await search('Зельеварение', student)).results.some(({ view }) => view === 'grades'));
+  assert.deepEqual((await search('Зельеварение', dean)).results, []);
+  assert.ok((await search('Карта кампуса', dean)).results.some(({ view }) => view === 'campus'));
+  const contact = initial.contacts[0];
+  assert.ok((await search(contact.email, student)).results.some(({ id }) => id === 'contact-' + contact.id));
   assert.match((await expect('/me', student)).profile.fullName, /Нюша/);
   assert.ok(new Set(initial.grades.map((grade) => grade.semester)).size >= 2);
   assert.ok(initial.notifications.some(({ title }) => /отменено/i.test(title)));
@@ -90,6 +98,9 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   await expect('/requests', student, { type: 'Справка об обучении' });
   const application = (await cabinet(student)).requests.find(({ id }) => !initial.requests.some((row) => row.id === id));
   assert.ok(application);
+  const requestHit = ({ id }) => id === 'request-' + application.id;
+  assert.ok((await search('Справка об обучении', student)).results.some(requestHit));
+  assert.ok(!(await search('Справка об обучении', other)).results.some(requestHit));
   assert.ok(!(await cabinet(other)).requests.some(({ id }) => id === application.id));
   assert.ok(!(await cabinet(teacher)).requests.some(({ id }) => id === application.id));
   assert.ok((await cabinet(dean)).requests.some(({ id }) => id === application.id));
@@ -107,6 +118,7 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   await expect(thread, other, undefined, 404);
   await expect(thread + '/messages', other, { text: 'Чужое сообщение' }, 404);
   await expect(thread + '/messages', student, { text: 'Когда можно забрать справку?' });
+  assert.deepEqual((await search('Когда можно забрать справку?', student)).results, []);
   assert.ok((await expect(thread, dean)).messages.some((row) => row.text === 'Когда можно забрать справку?' && !row.mine));
   const beforeReply = (await cabinet(student)).unreadCount;
   await expect(thread + '/messages', dean, { text: 'Завтра после 14:00.' });
@@ -142,6 +154,8 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   });
   const assignment = (await cabinet(student)).assignments.find((item) => item.title === assignmentTitle);
   assert.ok(assignment);
+  assert.ok((await search(assignmentTitle, student)).results.some(({ id }) => id === 'assignment-' + assignment.id));
+  assert.deepEqual((await search(assignmentTitle, other)).results, []);
   const upload = '/assignments/' + assignment.id + '/submission';
   const pdf = tinyPdf();
   const fileHeaders = { 'Content-Type': 'application/pdf', 'X-Filename': 'report.pdf' };
@@ -172,8 +186,26 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   assert.equal((await gradeAfterReview()).points, initialGrade.points + 7);
   const appeal = (await cabinet(teacher)).appeals.find((item) => item.submissionId === submission.id);
   assert.ok(appeal);
+  await expect('/appeals/' + appeal.id + '/withdraw', other, {}, 404);
   await expect('/appeals/' + appeal.id + '/decision', teacher, { comment: 'Вывод подтверждён.', points: 9 });
+  await expect('/appeals/' + appeal.id + '/withdraw', student, {}, 409);
   assert.equal((await gradeAfterReview()).points, initialGrade.points + 9);
+
+  const reviewed = initial.assignments.find(({ submission }) => submission?.status === 'reviewed').submission;
+  await expect('/submissions/' + reviewed.id + '/appeal', student, { reason: 'Проверка отзыва.' });
+  const pending = (await cabinet(student)).appeals.find(({ submissionId }) => submissionId === reviewed.id);
+  await expect('/appeals/' + pending.id + '/withdraw', student, {});
+  await expect('/appeals/' + pending.id + '/decision', teacher, { comment: 'Позднее решение.', points: 1 }, 409);
+  assert.equal((await gradeAfterReview()).points, initialGrade.points + 9);
+
+  const otherWork = (await cabinet(other)).assignments.find(({ submission }) => submission?.status === 'reviewed').submission;
+  await expect('/submissions/' + otherWork.id + '/appeal', other, { reason: 'Проверка одновременного перехода.' });
+  const otherAppeal = (await cabinet(other)).appeals.find(({ submissionId }) => submissionId === otherWork.id);
+  const concurrent = await Promise.all([
+    request('/appeals/' + otherAppeal.id + '/withdraw', other, {}),
+    request('/appeals/' + otherAppeal.id + '/decision', teacher, { comment: 'Проверено.', points: otherWork.points }),
+  ]);
+  assert.deepEqual(concurrent.map(({ status }) => status).sort(), [200, 409]);
 
   const documentTitle = 'Работа в формате DOCX';
   await expect('/assignments', teacher, {
@@ -190,6 +222,10 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   await stop();
   await start();
   const persisted = await cabinet(student);
+  const withdrawn = persisted.appeals.find(({ id }) => id === pending.id);
+  assert.equal(withdrawn.status, 'withdrawn');
+  assert.ok(withdrawn.withdrawnAt);
+  assert.deepEqual(withdrawn.history.map(({ status }) => status), ['pending', 'withdrawn']);
   assert.equal(persisted.requests.find(({ id }) => id === application.id).status, 'ready');
   assert.equal(persisted.assignments.find(({ id }) => id === assignment.id).submission.points, 9);
   const decision = persisted.appeals.find(({ id }) => id === appeal.id);

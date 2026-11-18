@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#172947">
+  <meta name="theme-color" content="#fbf8f2">
   <title>Личный кабинет</title>
   <link rel="stylesheet" href="/styles.css">
   <script src="/app.js" defer></script>
@@ -18,9 +18,6 @@
       <div class="brand">
         <span class="brand-mark" aria-hidden="true">ЛК</span>
         <span>Личный кабинет<br>студента</span>
-      </div>
-      <div class="cover-art" aria-hidden="true">
-        <span></span><span></span><span></span>
       </div>
       <p class="prototype-notice">Конкурсный прототип. Неофициальный сервис</p>
     </div>
@@ -42,6 +39,10 @@
   </main>
 
   <div class="app-shell" id="app" hidden>
+    <header class="mobile-header">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">ЛК</span>Личный кабинет</div>
+      <button class="avatar mobile-avatar" type="button" id="mobile-avatar" aria-label="Открыть меню профиля" aria-haspopup="dialog" aria-controls="mobile-menu" aria-expanded="false"></button>
+    </header>
     <aside class="sidebar">
       <div class="brand">
         <span class="brand-mark" aria-hidden="true">ЛК</span>
@@ -54,7 +55,9 @@
         <a href="#assignments" data-view="assignments"><span class="nav-icon icon-sheet" aria-hidden="true"></span>Задания</a>
         <a href="#requests" data-view="requests"><span class="nav-icon icon-sheet" aria-hidden="true"></span>Справки</a>
         <a href="#messages" data-view="messages"><span class="nav-icon icon-message" aria-hidden="true"></span>Сообщения<span class="count-badge nav-count" data-unread hidden></span></a>
+        <a href="#contacts" data-view="contacts"><span class="nav-icon icon-profile" aria-hidden="true"></span>Контакты</a>
         <a href="#updates" data-view="updates"><span class="nav-icon icon-bell" aria-hidden="true"></span>Уведомления</a>
+        <a href="#campus" data-view="campus"><span class="nav-icon icon-calendar" aria-hidden="true"></span>Карта кампуса</a>
         <a href="#profile" data-view="profile"><span class="nav-icon icon-profile" aria-hidden="true"></span>Профиль</a>
       </nav>
       <div class="sidebar-account">
@@ -73,11 +76,17 @@
       <main class="main-content">
         <header class="page-header">
           <h1 id="page-heading" tabindex="-1">Главная</h1>
-          <div class="header-actions">
-            <time id="header-date" hidden></time>
-            <a class="button button-secondary header-inbox" href="#messages"><span class="nav-icon icon-message" aria-hidden="true"></span>Сообщения<span class="count-badge" data-unread>0</span></a>
-          </div>
+          <a class="button button-secondary header-inbox" id="header-inbox" href="#messages"><span class="nav-icon icon-message" aria-hidden="true"></span>Сообщения<span class="count-badge" data-unread>0</span></a>
         </header>
+        <form class="app-search" id="search-form" role="search">
+          <label class="visually-hidden" for="search-query">Поиск по кабинету</label>
+          <input id="search-query" type="search" placeholder="Поиск по кабинету" maxlength="100" autocomplete="off" aria-controls="search-results">
+          <button class="button button-secondary" type="submit">Найти</button>
+          <div class="search-results panel" id="search-results" hidden>
+            <p id="search-status" class="muted" role="status"></p>
+            <ul id="search-list"></ul>
+          </div>
+        </form>
         <p class="app-error" id="app-error" role="alert"></p>
         <div class="schedule-status" id="cabinet-status" hidden>
           <p role="status" id="cabinet-status-text"></p>
@@ -154,18 +163,69 @@
             </section>
             <section class="panel conversation" aria-labelledby="dialogue-heading">
               <h2 id="dialogue-heading" tabindex="-1">Переписка</h2>
+              <div id="dialogue-contact"></div>
               <p class="local-error" id="dialogue-error" role="alert"></p>
               <div id="messages-content"><p class="empty-state">Выберите диалог.</p></div>
               <form class="cabinet-form message-form" id="message-form" hidden>
                 <label for="message-text">Сообщение</label>
                 <textarea id="message-text" name="text" rows="2" maxlength="2000" required></textarea>
-                <button class="button button-primary" id="message-submit" type="submit">Отправить</button>
+                <p class="local-error" id="message-error" role="alert"></p>
+                <div class="message-actions">
+                  <button class="button button-primary" id="message-submit" type="submit">Отправить</button>
+                  <button class="button button-secondary" id="emoji-toggle" type="button" aria-expanded="false" aria-controls="emoji-options">Эмодзи</button>
+                </div>
+                <div class="emoji-options" id="emoji-options" aria-label="Эмодзи" role="group" hidden></div>
               </form>
             </section>
           </div>
         </section>
+        <section class="view" id="view-contacts" aria-label="Контакты преподавателей" hidden>
+          <div class="cabinet-layout" id="contacts-content"></div>
+        </section>
         <section class="view" id="view-updates" aria-label="Системные уведомления" hidden>
           <div class="cabinet-layout" id="updates-content"></div>
+        </section>
+
+        <section class="view" id="view-campus" aria-label="Карта кампуса" hidden>
+          <div class="cabinet-layout">
+            <section class="panel">
+              <header class="panel-header"><h2>МГИМО на проспекте Вернадского</h2></header>
+              <p>Москва, проспект Вернадского, 76</p>
+              <a class="button button-primary" href="https://mgimo.ru/territory/">Открыть официальную интерактивную карту</a>
+            </section>
+            <section class="panel" aria-labelledby="campus-buildings-title">
+              <header class="panel-header"><h2 id="campus-buildings-title">Корпуса на официальной карте</h2></header>
+              <ul class="campus-buildings">
+                <li class="status-badge">Корпус А</li>
+                <li class="status-badge">Корпус Б</li>
+                <li class="status-badge">Корпус В</li>
+                <li class="status-badge">Корпус Г</li>
+                <li class="status-badge" id="campus-building-new">Новый корпус</li>
+              </ul>
+            </section>
+            <section class="panel" aria-labelledby="campus-rooms-title">
+              <header class="panel-header"><h2 id="campus-rooms-title">Найти помещение</h2></header>
+              <p>В справочнике доступен зал 314 по программе конференции 2023 года. Перед посещением сверяйтесь с официальной картой.</p>
+              <form class="cabinet-form" id="campus-room-form" role="search" aria-label="Поиск помещения">
+                <div class="form-field">
+                  <label for="campus-room-query">Номер зала или аудитории</label>
+                  <input type="search" id="campus-room-query" maxlength="80" placeholder="Например, 314" required>
+                </div>
+                <button type="submit" class="button button-primary">Найти</button>
+              </form>
+              <p id="campus-room-result" role="status"></p>
+              <p class="muted">Аудитории учебного расписания вымышлены. Для расширения справочника нужна актуальная привязка помещений к корпусам и этажам.</p>
+            </section>
+            <section class="panel">
+              <header class="panel-header"><h2>Источники</h2></header>
+              <p class="muted">Проверены 19 ноября 2026 года.</p>
+              <ul>
+                <li><a href="https://mgimo.ru/about/contacts/">Контакты и схема проезда МГИМО</a></li>
+                <li><a href="https://mgimo.ru/territory/campus/">Описание кампуса МГИМО</a></li>
+                <li><a href="https://mgimo.ru/upload/2023/11/prog-vi-liventsev-readings.pdf#page=66">Программа VI Ливенцевских чтений, 2023, страницы 5 и 66</a></li>
+              </ul>
+            </section>
+          </div>
         </section>
 
         <section class="view" id="view-profile" aria-label="Профиль" hidden>
@@ -191,6 +251,17 @@
       <footer class="app-footer prototype-notice">Конкурсный прототип. Неофициальный сервис</footer>
     </div>
   </div>
+  <dialog class="mobile-menu" id="mobile-menu" aria-labelledby="mobile-menu-name" aria-describedby="mobile-menu-role">
+    <div class="mobile-menu-content">
+      <div class="mobile-menu-account">
+        <div><h2 id="mobile-menu-name"></h2><p class="muted" id="mobile-menu-role"></p></div>
+        <form method="dialog"><button class="button button-secondary" type="submit" autofocus>Закрыть</button></form>
+      </div>
+      <nav class="primary-nav" id="mobile-nav" aria-label="Разделы кабинета"></nav>
+      <button class="logout-button" id="mobile-logout" type="button">Выйти</button>
+      <p class="local-error" id="mobile-logout-error" role="alert"></p>
+    </div>
+  </dialog>
   <dialog class="lesson-dialog panel" id="lesson-dialog" aria-labelledby="lesson-dialog-heading">
     <div class="panel-heading">
       <h2 id="lesson-dialog-heading">Занятие</h2>

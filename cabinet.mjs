@@ -5,6 +5,20 @@ const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.doc
 const maxUpload = 10 * 1024 * 1024;
 const currentSemester = 2;
 
+const demoTeacherIds = new Map([
+  ['Мария Ланская', 'maria-lanskaya'],
+  ['Павел Вересов', 'pavel-veresov'],
+  ['Ольга Листова', 'olga-listova'],
+  ['Кира Волина', 'kira-volina'],
+  ['Лидия Ольшина', 'lidia-olshina'],
+  ['Сергей Вельский', 'sergey-velsky'],
+]);
+
+export function demoContact(name) {
+  const id = demoTeacherIds.get(name);
+  return id ? { id, name, email: `${id.replace('-', '.')}@example.com` } : null;
+}
+
 const subjects = [
   ['Зельеварение', 'Мария Ланская', 'Экзамен', 'Техника приготовления, точность измерений и оформление наблюдений.'],
   ['Трансфигурация', 'Павел Вересов', 'Зачёт', 'Точность преобразования и соблюдение последовательности действий.'],
@@ -225,10 +239,7 @@ function seedCabinetFixtures(db) {
   }
 }
 
-export function seedCabinet(db, { today, monday }) {
-  const version = db.prepare('PRAGMA user_version').get().user_version;
-  if (version >= 3) return;
-  if (version < 2) seedCabinetFixtures(db);
+function seedLessonCancellation(db, { today, monday }) {
   const todayWeekday = new Date(`${today}T00:00:00Z`).getUTCDay() || 7;
   const nextLesson = db.prepare(`
     SELECT l.id, l.student_id, l.title, l.start_time, l.weekday FROM lessons l
@@ -247,7 +258,46 @@ export function seedCabinet(db, { today, monday }) {
       .run(nextLesson.student_id, 'Занятие отменено',
         `${nextLesson.title} · ${displayDate} · ${nextLesson.start_time}.`, new Date().toISOString());
   }
-  db.exec('PRAGMA user_version = 3');
+}
+
+function migrateAppeals(db) {
+  db.exec(`
+    ALTER TABLE appeals RENAME TO previous_appeals;
+    CREATE TABLE appeals (
+      id INTEGER PRIMARY KEY,
+      submission_id INTEGER NOT NULL UNIQUE REFERENCES submissions(id),
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('pending', 'decided', 'withdrawn')),
+      comment TEXT,
+      old_points REAL NOT NULL,
+      new_points REAL,
+      created_at TEXT NOT NULL,
+      decided_at TEXT,
+      withdrawn_at TEXT
+    ) STRICT;
+    INSERT INTO appeals (id, submission_id, reason, status, comment, old_points, new_points, created_at, decided_at)
+      SELECT id, submission_id, reason, status, comment, old_points, new_points, created_at, decided_at
+      FROM previous_appeals;
+    DROP TABLE previous_appeals;
+    CREATE TABLE appeal_history (
+      id INTEGER PRIMARY KEY,
+      appeal_id INTEGER NOT NULL REFERENCES appeals(id),
+      status TEXT NOT NULL CHECK (status IN ('pending', 'decided', 'withdrawn')),
+      created_at TEXT NOT NULL
+    ) STRICT;
+    CREATE INDEX appeal_history_appeal ON appeal_history(appeal_id, id);
+    INSERT INTO appeal_history (appeal_id, status, created_at) SELECT id, 'pending', created_at FROM appeals;
+    INSERT INTO appeal_history (appeal_id, status, created_at)
+      SELECT id, 'decided', decided_at FROM appeals WHERE status = 'decided' AND decided_at IS NOT NULL;
+    PRAGMA user_version = 4;
+  `);
+}
+
+export function seedCabinet(db, week) {
+  const version = db.prepare('PRAGMA user_version').get().user_version;
+  if (version < 2) seedCabinetFixtures(db);
+  if (version < 3) seedLessonCancellation(db, week);
+  if (version < 4) migrateAppeals(db);
 }
 
 function isPdf(contents) {
@@ -349,6 +399,23 @@ function filenameHeader(filename) {
   return `attachment; filename*=UTF-8''${encoded}`;
 }
 
+const searchSections = [
+  ['home', 'Главная'],
+  ['schedule', 'Расписание', ['student']],
+  ['grades', 'Успеваемость', ['student', 'teacher'], 'оценки баллы'],
+  ['assignments', 'Задания', ['student', 'teacher']],
+  ['requests', 'Справки', ['student', 'dean'], 'заявки'],
+  ['messages', 'Сообщения'],
+  ['updates', 'Уведомления'],
+  ['contacts', 'Контакты', null, 'преподаватели'],
+  ['campus', 'Карта кампуса', null, 'кампус'],
+  ['profile', 'Профиль'],
+];
+
+function searchText(value) {
+  return value.normalize('NFC').toLowerCase().replaceAll('ё', 'е').replace(/\s+/g, ' ').trim();
+}
+
 export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody, json }) {
   const prepare = (sql) => db.prepare(sql);
   const grades = prepare(`
@@ -379,15 +446,25 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
   const dean = prepare("SELECT id FROM students WHERE role = 'dean'");
   const dialogues = prepare(`
     SELECT d.id,
-      CASE WHEN d.student_id = ? THEN
+      CASE WHEN d.student_id = :viewerId THEN
         CASE WHEN staff.role = 'dean' THEN 'Деканат' ELSE staff.full_name END
         ELSE student.full_name END AS title,
-      (SELECT COUNT(*) FROM messages m WHERE m.dialogue_id = d.id AND m.sender_id <> ?
-        AND m.id > CASE WHEN d.student_id = ? THEN d.student_read_id ELSE d.staff_read_id END) AS unreadCount
+      CASE WHEN d.student_id = :viewerId AND staff.role = 'teacher' THEN staff.full_name END AS teacherName,
+      (SELECT COUNT(*) FROM messages m WHERE m.dialogue_id = d.id AND m.sender_id <> :viewerId
+        AND m.id > CASE WHEN d.student_id = :viewerId THEN d.student_read_id ELSE d.staff_read_id END) AS unreadCount
     FROM dialogues d JOIN students staff ON staff.id = d.staff_id
     JOIN students student ON student.id = d.student_id
-    WHERE d.student_id = ? OR d.staff_id = ?
+    WHERE d.student_id = :viewerId OR d.staff_id = :viewerId
     ORDER BY d.id
+  `);
+  const contactNames = prepare(`
+    SELECT teacher AS name FROM lessons WHERE student_id = :viewerId
+    UNION
+    SELECT staff.full_name FROM dialogues d JOIN students staff ON staff.id = d.staff_id
+    WHERE d.student_id = :viewerId AND staff.role = 'teacher'
+    UNION
+    SELECT staff.full_name FROM enrollments e JOIN students staff ON staff.id = e.teacher_id
+    WHERE e.student_id = :viewerId AND staff.role = 'teacher'
   `);
   const dialogueById = prepare('SELECT student_id FROM dialogues WHERE id = ? AND (student_id = ? OR staff_id = ?)');
   const messages = prepare(`
@@ -445,14 +522,23 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
   const review = prepare("UPDATE submissions SET points = ?, comment = ?, status = 'reviewed' WHERE id = ?");
   const appeals = prepare(`
     SELECT p.id, p.submission_id AS submissionId, a.title, p.reason, p.status, p.comment,
-      p.old_points AS oldPoints, p.new_points AS newPoints, p.created_at AS createdAt, p.decided_at AS decidedAt
+      p.old_points AS oldPoints, p.new_points AS newPoints, p.created_at AS createdAt,
+      p.decided_at AS decidedAt, p.withdrawn_at AS withdrawnAt,
+      (SELECT json_group_array(json_object('status', h.status, 'createdAt', h.created_at) ORDER BY h.id)
+       FROM appeal_history h WHERE h.appeal_id = p.id) AS history
     FROM appeals p JOIN submissions s ON s.id = p.submission_id JOIN assignments a ON a.id = s.assignment_id
     JOIN enrollments e ON e.id = a.enrollment_id WHERE e.student_id = ? OR e.teacher_id = ?
     ORDER BY p.id DESC
   `);
+  const createAppealEvent = prepare('INSERT INTO appeal_history (appeal_id, status, created_at) VALUES (?, ?, ?)');
   const openAppeal = prepare(`
     INSERT INTO appeals (submission_id, reason, status, old_points, created_at)
     VALUES (?, ?, 'pending', ?, ?) ON CONFLICT (submission_id) DO NOTHING
+  `);
+  const studentAppeal = prepare(`
+    SELECT p.id FROM appeals p JOIN submissions s ON s.id = p.submission_id
+    JOIN assignments a ON a.id = s.assignment_id JOIN enrollments e ON e.id = a.enrollment_id
+    WHERE p.id = ? AND e.student_id = ?
   `);
   const teacherAppeal = prepare(`
     SELECT p.submission_id, p.status, s.points, a.title, a.max_points, e.student_id
@@ -460,7 +546,11 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     JOIN enrollments e ON e.id = a.enrollment_id WHERE p.id = ? AND e.teacher_id = ?
   `);
   const decideAppeal = prepare(`
-    UPDATE appeals SET status = 'decided', comment = ?, new_points = ?, decided_at = ? WHERE id = ?
+    UPDATE appeals SET status = 'decided', comment = ?, new_points = ?, decided_at = ?
+    WHERE id = ? AND status = 'pending'
+  `);
+  const withdrawAppeal = prepare(`
+    UPDATE appeals SET status = 'withdrawn', withdrawn_at = ? WHERE id = ? AND status = 'pending'
   `);
   const updatePoints = prepare('UPDATE submissions SET points = ? WHERE id = ?');
 
@@ -503,9 +593,16 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     return new Date().toISOString();
   }
 
+  function contacts(viewer) {
+    return viewer.role === 'student' ? contactNames.all({ viewerId: viewer.id })
+      .map(({ name }) => demoContact(name)).filter(Boolean)
+      .sort((first, second) => first.name.localeCompare(second.name, 'ru')) : [];
+  }
+
   function cabinet(viewer) {
     const { id, role } = viewer;
-    const conversations = dialogues.all(id, id, id, id, id);
+    const conversations = dialogues.all({ viewerId: id })
+      .map(({ teacherName, ...dialogue }) => ({ ...dialogue, contact: demoContact(teacherName) }));
     return {
       grades: role === 'dean' ? [] : grades.all(id, role, id, role),
       requests: role === 'teacher' ? [] : requests.all(id, role)
@@ -516,10 +613,52 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
           ...assignment,
           submission: submissionId === null ? null : { id: submissionId, filename, points, comment, status },
         })),
-      appeals: role === 'dean' ? [] : appeals.all(id, id),
+      appeals: role === 'dean' ? [] : appeals.all(id, id)
+        .map(({ history, ...appeal }) => ({ ...appeal, history: JSON.parse(history) })),
       notifications: notifications.all(id),
+      contacts: contacts(viewer),
       unreadCount: conversations.reduce((total, dialogue) => total + dialogue.unreadCount, 0),
     };
+  }
+
+  function search(viewer, query) {
+    const results = [];
+    const normalized = searchText(query);
+    if (!normalized) return { results };
+    const words = normalized.split(' ');
+    const { id, role } = viewer;
+
+    function add(type, title, view, target, ...fields) {
+      if (results.length >= 30) return;
+      const searchable = searchText([title, ...fields].join(' '));
+      if (words.every((word) => searchable.includes(word))) results.push({ type, title, view, id: target });
+    }
+
+    for (const [view, title, roles, keywords] of searchSections) {
+      if (!roles || roles.includes(role)) add('section', title, view, null, keywords);
+    }
+    if (role === 'student' || role === 'teacher') {
+      for (const grade of grades.all(id, role, id, role)) {
+        add('grade', grade.subject, 'grades', `grade-${grade.id}`,
+          grade.studentName, grade.criteria, grade.semester, grade.control, grade.result);
+      }
+      for (const assignment of assessments.all(id, id)) {
+        add('assignment', assignment.title, 'assignments', `assignment-${assignment.id}`,
+          assignment.studentName, assignment.subject, assignment.description);
+      }
+    }
+    if (role === 'student' || role === 'dean') {
+      for (const request of requests.all(id, role)) {
+        add('request', request.type, 'requests', `request-${request.id}`, request.studentName);
+      }
+    }
+    for (const notice of notifications.all(id)) {
+      add('notification', notice.title, 'updates', `notice-${notice.id}`, notice.text);
+    }
+    for (const contact of contacts(viewer)) {
+      add('contact', contact.name, 'contacts', `contact-${contact.id}`, contact.email);
+    }
+    return { results };
   }
 
   function submitRequest(viewer, _id, body) {
@@ -633,21 +772,35 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     if (work.status !== 'reviewed') throw new HttpError(409, 'Оценка за работу ещё не выставлена.');
     const reason = text(body.reason, 'Объясните причину пересмотра', 1500);
     const createdAt = now();
-    if (!openAppeal.run(id, reason, work.points, createdAt).changes) {
+    const opened = openAppeal.run(id, reason, work.points, createdAt);
+    if (!opened.changes) {
       throw new HttpError(409, 'Для этой работы уже есть запрос на пересмотр.');
     }
+    createAppealEvent.run(opened.lastInsertRowid, 'pending', createdAt);
     createNotice.run(work.teacher_id, 'Запрос на пересмотр', work.title, createdAt);
   }
 
   function resolveAppeal(viewer, id, body) {
     const appeal = found(teacherAppeal.get(id, viewer.id), 'Обращение не найдено.');
-    if (appeal.status !== 'pending') throw new HttpError(409, 'Обращение уже рассмотрено.');
+    if (appeal.status !== 'pending') throw new HttpError(409, 'Этот переход статуса недоступен.');
     const comment = text(body.comment, 'Введите решение по пересмотру', 1500);
     const points = body.points === null ? appeal.points : score(body.points, 0, appeal.max_points);
     const decidedAt = now();
+    if (!decideAppeal.run(comment, points, decidedAt, id).changes) {
+      throw new HttpError(409, 'Этот переход статуса недоступен.');
+    }
     updatePoints.run(points, appeal.submission_id);
-    decideAppeal.run(comment, points, decidedAt, id);
+    createAppealEvent.run(id, 'decided', decidedAt);
     createNotice.run(appeal.student_id, 'Запрос на пересмотр рассмотрен', appeal.title, decidedAt);
+  }
+
+  function retractAppeal(viewer, id) {
+    found(studentAppeal.get(id, viewer.id), 'Обращение не найдено.');
+    const withdrawnAt = now();
+    if (!withdrawAppeal.run(withdrawnAt, id).changes) {
+      throw new HttpError(409, 'Этот переход статуса недоступен.');
+    }
+    createAppealEvent.run(id, 'withdrawn', withdrawnAt);
   }
 
   const routes = [
@@ -663,6 +816,7 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     { method: 'POST', path: /^\/api\/submissions\/([^/]+)\/review$/, role: 'teacher', action: checkWork },
     { method: 'POST', path: /^\/api\/submissions\/([^/]+)\/appeal$/, role: 'student', action: requestAppeal },
     { method: 'POST', path: /^\/api\/appeals\/([^/]+)\/decision$/, role: 'teacher', action: resolveAppeal },
+    { method: 'POST', path: /^\/api\/appeals\/([^/]+)\/withdraw$/, role: 'student', action: retractAppeal },
   ];
 
   function match(method, path) {
@@ -702,5 +856,5 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     response.end(result.contents);
   }
 
-  return { match, handle };
+  return { match, handle, search };
 }
