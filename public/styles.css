@@ -1,19 +1,32 @@
 :root {
   color-scheme: light;
-  --ink: #26283b;
-  --muted: #55536c;
-  --canvas: #fbf8f2;
-  --surface: #fffdf9;
-  --border: #ded7e4;
-  --lavender: #f0eaf9;
-  --lavender-active: #e4d9f3;
-  --mint: #e3f4eb;
+  --ink: #182747;
+  --muted: #445572;
+  --canvas: #e7f0fa;
+  --surface: #f9fcff;
+  --border: #c2d1e5;
+  --lavender: #eeebff;
+  --lavender-active: #e1defa;
+  --mint: #e0f4f4;
   --peach: #faebdc;
-  --primary: #235d52;
-  --primary-hover: #19473d;
-  --focus: #685099;
-  --backdrop: rgb(38 40 59 / .48);
-  --radius: 15px;
+  --primary: #17536b;
+  --primary-hover: #153d59;
+  --indigo: #343580;
+  --focus: #4d3eaa;
+  --backdrop: rgb(23 39 73 / .38);
+  --radius: 16px;
+  --glass: #eff6fc;
+  --glass-dense: #f4f9ff;
+  --glass-edge: #fff;
+  --glass-hairline: rgb(255 255 255 / .69);
+  --glass-shadow: 0 6px 18px rgb(35 65 122 / .09);
+  --glass-raised: 0 18px 44px rgb(28 49 99 / .19);
+  --app-gradient:
+    radial-gradient(ellipse 65rem 30rem at 0 0, #b9e4fb, transparent 95%),
+    radial-gradient(ellipse 48rem 29rem at 100% 0, #d2ccfa, transparent 90%),
+    radial-gradient(ellipse 57rem 33rem at 93% 42rem, #c2e9ec, transparent 95%),
+    linear-gradient(150deg, #e1e9fd, #e8f4fa 67%, #eae8f9);
+  --welcome-gradient: linear-gradient(112deg, #343580, #25547e 58%, #136273);
   font: 16px / 1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--ink);
   background: var(--canvas);
@@ -162,6 +175,8 @@ a { color: var(--primary); }
   grid-template-columns: 214px minmax(0, 1fr);
   grid-template-rows: auto 1fr;
   min-height: 100vh;
+  background: var(--canvas);
+  background-image: var(--app-gradient);
 }
 
 .app-header {
@@ -186,8 +201,8 @@ a { color: var(--primary); }
   margin: 0;
   padding: 0;
   border: 0;
-  border-right: 1px solid var(--border);
-  background: var(--lavender);
+  border-right: 1px solid var(--glass-edge);
+  background: var(--glass);
   color: var(--ink);
   overscroll-behavior: contain;
 }
@@ -254,7 +269,12 @@ a { color: var(--primary); }
 .primary-nav a:hover, .primary-nav a[aria-current="page"] {
   background: var(--lavender-active);
 }
-.primary-nav a[aria-current="page"] { font-weight: 750; }
+.primary-nav a[aria-current="page"] {
+  color: var(--indigo);
+  font-weight: 750;
+  background: linear-gradient(105deg, var(--lavender-active), var(--mint));
+  box-shadow: inset 0 0 0 1px var(--glass-hairline);
+}
 
 .nav-icon {
   display: block;
@@ -376,10 +396,12 @@ a { color: var(--primary); }
 }
 
 .welcome {
-  padding: 11px clamp(12px, 2vw, 20px);
-  border: 1px solid var(--border);
+  padding: 13px clamp(14px, 2vw, 23px);
+  border: 1px solid var(--glass-hairline);
   border-radius: var(--radius);
-  background: var(--mint);
+  background: var(--welcome-gradient);
+  color: #fff;
+  box-shadow: var(--glass-shadow);
 }
 
 .welcome h2 { font-size: clamp(1.2rem, 2vw, 1.6rem); line-height: 1.2; letter-spacing: -.025em; }
@@ -392,8 +414,19 @@ a { color: var(--primary); }
 }
 .home-grid:has(> :only-child[hidden]), .home-grid:not(:has(> :not([hidden]))) { display: none; }
 
-.home-upcoming { background: var(--mint); }
-.home-changes { background: var(--peach); }
+#view-home .panel {
+  border-color: var(--glass-edge);
+  background: var(--glass);
+  box-shadow: var(--glass-shadow);
+}
+
+#view-home .home-upcoming,
+#view-home .home-calendar { background: var(--glass-dense); }
+#home-schedule { align-items: start; }
+#view-home .home-upcoming .panel-heading h2 { color: var(--indigo); }
+#view-home .home-changes .panel-heading h2 { font-size: 1.08rem; }
+#view-home .stat { box-shadow: none; }
+#view-home .stat:hover { background: var(--glass-dense); border-color: var(--primary); }
 .home-upcoming .upcoming-row, .home-changes .change-row { padding-block: 7px; }
 .home-upcoming .upcoming-row:last-child, .home-changes .change-row:last-child { padding-bottom: 0; }
 .home-day { margin-top: 10px; }
@@ -603,8 +636,8 @@ a { color: var(--primary); }
     align-items: center;
     gap: 10px;
     padding: max(8px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) 8px max(14px, env(safe-area-inset-left));
-    border-bottom: 1px solid var(--border);
-    background: var(--lavender);
+    border-bottom: 1px solid var(--glass-edge);
+    background: var(--glass);
   }
   .mobile-header {
     display: flex;
@@ -1134,20 +1167,21 @@ details[open] > .record-summary::before { transform: rotate(45deg); }
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--glass-dense);
   color: var(--ink);
-  box-shadow: 0 8px 32px rgb(38 40 59 / .22);
+  border-color: var(--glass-edge);
+  box-shadow: var(--glass-raised);
 }
 .help-dialog[open] { display: flex; flex-direction: column; }
-.help-dialog::backdrop { background: var(--backdrop); }
+.help-dialog::backdrop { background: transparent; }
 .help-dialog-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--lavender);
+  border-bottom: 1px solid var(--glass-hairline);
+  background: linear-gradient(105deg, var(--lavender), var(--mint));
 }
 .help-dialog-heading h2 { font-size: 1.08rem; line-height: 1.2; }
 .help-dialog-heading .button { min-height: 44px; padding-inline: 9px; }
@@ -1235,4 +1269,20 @@ details[open] > .record-summary::before { transform: rotate(45deg); }
 
 @media (max-width: 680px) {
   .app-shell:has(#view-campus:not([hidden]) .campus-card:not([hidden])) .help-dock { display: none; }
+}
+
+
+/* Blur only the navigation and the top-level assistant surface. */
+@supports (backdrop-filter: blur(1px)) {
+  :root {
+    --glass: rgb(247 251 255 / .72);
+    --glass-dense: rgb(248 251 255 / .91);
+    --glass-edge: var(--glass-hairline);
+  }
+
+  .sidebar, .mobile-menu, .help-dialog { backdrop-filter: blur(12px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-menu[open] { animation: none; }
 }

@@ -204,3 +204,43 @@ test('library searches titles and authors, filters disciplines and remembers a f
   await expect(books.getByText('Архив звёздных карт', { exact: true })).toBeVisible();
   await expect(books.getByText('Наблюдения за ночным небом', { exact: true })).toHaveCount(0);
 });
+
+for (const [label, width, height] of [['desktop', 1440, 980], ['360', 360, 800]]) {
+  test(`glass surfaces and assistant at ${label}`, async ({ page, cabinet }) => {
+    await page.setViewportSize({ width, height });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await login(page, cabinet);
+    await expect(page.getByRole('heading', { name: 'Учебная неделя' })).toBeVisible();
+    await fits(page);
+    await page.screenshot({ path: `test-results/glass/home-${label}.png`, animations: 'disabled' });
+
+    const launcher = page.locator('#help-launcher');
+    await launcher.focus();
+    await page.keyboard.press('Enter');
+    const dialog = page.locator('#help-dialog');
+    const input = dialog.getByRole('textbox', { name: 'Вопрос о кабинете' });
+    await expect(dialog).toBeVisible();
+    await expect(input).toBeInViewport();
+    await expect(dialog.getByRole('button', { name: 'Получить ответ' })).toBeInViewport();
+    const { backdrop, box } = await dialog.evaluate((element) => {
+      const window = element.ownerDocument.defaultView;
+      const bounds = element.getBoundingClientRect();
+      return {
+        backdrop: window.getComputedStyle(element, '::backdrop').backgroundColor,
+        box: { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom },
+      };
+    });
+    expect(backdrop).toBe('rgba(0, 0, 0, 0)');
+    expect(box.left).toBeGreaterThanOrEqual(0);
+    expect(box.top).toBeGreaterThanOrEqual(0);
+    expect(box.right).toBeLessThanOrEqual(width);
+    expect(box.bottom).toBeLessThanOrEqual(height);
+    await page.keyboard.press('Tab');
+    await expect(dialog.getByRole('button', { name: 'Закрыть' })).toBeFocused();
+    await expect(dialog.getByRole('button', { name: 'Закрыть' })).toHaveCSS('outline-style', 'solid');
+    await page.screenshot({ path: `test-results/glass/helper-${label}.png`, animations: 'disabled' });
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(launcher).toBeFocused();
+  });
+}
