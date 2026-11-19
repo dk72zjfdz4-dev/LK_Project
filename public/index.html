@@ -6,6 +6,8 @@
   <meta name="theme-color" content="#fbf8f2">
   <title>Личный кабинет</title>
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/desktop-tablet.css">
+  <link rel="stylesheet" href="/mobile.css">
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -79,7 +81,7 @@
 
     <header class="app-header">
       <div class="mobile-header">
-        <button class="avatar mobile-avatar" type="button" id="mobile-avatar" aria-label="Открыть меню профиля" aria-haspopup="dialog" aria-controls="mobile-menu" aria-expanded="false"></button>
+        <a class="avatar mobile-avatar" id="mobile-avatar" href="#profile" aria-label="Открыть профиль"></a>
         <span class="brand">Личный кабинет</span>
       </div>
       <form class="app-search" id="search-form" role="search">
@@ -291,6 +293,18 @@
           </div>
         </section>
 
+        <section class="view mobile-menu-page" id="view-menu" aria-label="Дополнительные разделы" hidden>
+          <nav class="primary-nav mobile-menu-groups" id="mobile-nav" aria-label="Дополнительные разделы"></nav>
+          <div class="mobile-menu-profile">
+            <div class="sidebar-person">
+              <span class="avatar" id="mobile-menu-initials" aria-hidden="true"></span>
+              <div><strong id="mobile-menu-name"></strong><p class="muted" id="mobile-menu-role"></p></div>
+            </div>
+            <button class="logout-button" id="mobile-logout" type="button">Выйти</button>
+            <p class="local-error" id="mobile-logout-error" role="alert"></p>
+          </div>
+        </section>
+
         <section class="view" id="view-profile" aria-label="Профиль" hidden>
           <div class="panel profile">
             <div class="profile-heading">
@@ -313,6 +327,13 @@
 
       <footer class="app-footer prototype-notice">Конкурсный прототип. Неофициальный сервис</footer>
     </div>
+    <nav class="mobile-tabs" aria-label="Основная навигация">
+      <a href="#home" data-view="home"><span class="nav-icon icon-home" aria-hidden="true"></span><span class="mobile-tab-label">Главная</span></a>
+      <a href="#schedule" data-view="schedule"><span class="nav-icon icon-calendar" aria-hidden="true"></span><span class="mobile-tab-label">Расписание</span></a>
+      <a href="#messages" data-view="messages"><span class="nav-icon icon-message" aria-hidden="true"></span><span class="mobile-tab-label">Сообщения</span><span class="count-badge nav-count" data-unread hidden></span></a>
+      <a href="#menu" data-view="menu"><span class="nav-icon icon-menu" aria-hidden="true"></span><span class="mobile-tab-label">Меню</span></a>
+      <a href="#profile" data-view="profile"><span class="nav-icon icon-profile" aria-hidden="true"></span><span class="mobile-tab-label">Профиль</span></a>
+    </nav>
     <div class="help-dock">
       <button class="help-launcher" id="help-launcher" type="button" aria-label="Помощник по кабинету" aria-haspopup="dialog" aria-controls="help-dialog" aria-expanded="false" aria-describedby="help-tooltip"><span aria-hidden="true">?</span></button>
       <span class="help-tooltip" id="help-tooltip" role="tooltip">Есть вопросы? Задавайте!</span>
@@ -339,22 +360,6 @@
       </form>
     </dialog>
   </div>
-  <dialog class="mobile-menu" id="mobile-menu" aria-labelledby="mobile-menu-name" aria-describedby="mobile-menu-role">
-    <div class="mobile-menu-content">
-      <div class="mobile-menu-account">
-        <form method="dialog"><button class="button button-secondary" type="submit" autofocus>Закрыть</button></form>
-      </div>
-      <nav class="primary-nav" id="mobile-nav" aria-label="Разделы кабинета"></nav>
-      <div class="mobile-menu-footer">
-        <div class="sidebar-person">
-          <span class="avatar" id="mobile-menu-initials" aria-hidden="true"></span>
-          <div><h2 id="mobile-menu-name"></h2><p class="muted" id="mobile-menu-role"></p></div>
-        </div>
-        <button class="logout-button" id="mobile-logout" type="button">Выйти</button>
-        <p class="local-error" id="mobile-logout-error" role="alert"></p>
-      </div>
-    </div>
-  </dialog>
   <dialog class="lesson-dialog panel" id="lesson-dialog" aria-labelledby="lesson-dialog-heading">
     <div class="panel-heading">
       <h2 id="lesson-dialog-heading">Занятие</h2>

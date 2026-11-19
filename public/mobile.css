@@ -1,0 +1,139 @@
+.mobile-tabs,
+.mobile-menu-page {
+  display: none;
+}
+
+@media (max-width: 680px) {
+  html {
+    --mobile-tabs-height: calc(62px + env(safe-area-inset-bottom));
+    --mobile-dock-gap: 10px;
+  }
+
+  html:has(.app-shell:not([hidden])) {
+    scroll-padding-block-end: calc(var(--mobile-tabs-height) + var(--mobile-dock-gap));
+  }
+
+  .app-shell {
+    padding-bottom: var(--mobile-tabs-height);
+  }
+
+  .mobile-tabs {
+    position: fixed;
+    z-index: 7;
+    inset: auto 0 0;
+    display: flex;
+    align-items: stretch;
+    min-height: var(--mobile-tabs-height);
+    padding: 4px max(6px, env(safe-area-inset-right))
+      calc(4px + env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
+    border-top: 1px solid var(--glass-edge);
+    background: var(--glass-dense);
+    box-shadow: 0 -4px 16px rgb(23 46 90 / 8%);
+  }
+
+  .mobile-tabs a {
+    position: relative;
+    display: grid;
+    flex: 1 1 0;
+    align-content: center;
+    justify-items: center;
+    gap: 4px;
+    min-width: 0;
+    min-height: 52px;
+    padding: 3px 1px;
+    border-radius: 11px;
+    color: var(--ink);
+    font-size: .68rem;
+    font-weight: 640;
+    line-height: 1.2;
+    text-align: center;
+    text-decoration: none;
+  }
+
+  .mobile-tabs a[aria-current="page"],
+  .mobile-tabs a[aria-current="true"] {
+    color: var(--indigo);
+    background: linear-gradient(110deg, var(--lavender-active), var(--mint));
+  }
+
+  .mobile-tabs a:focus-visible {
+    z-index: 1;
+    outline-offset: -2px;
+  }
+
+  .mobile-tab-label { max-width: 100%; overflow-wrap: anywhere; }
+
+  .mobile-tabs .count-badge {
+    position: absolute;
+    inset-block-start: 1px;
+    inset-inline-start: calc(50% + 5px);
+    min-width: 16px;
+    min-height: 16px;
+    padding-inline: 3px;
+    font-size: .57rem;
+  }
+
+  .mobile-avatar { flex: 0 0 44px; text-decoration: none; }
+
+  .mobile-menu-page {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .mobile-menu-groups {
+    gap: 13px;
+    padding: 0;
+    overflow: visible;
+  }
+
+  .mobile-menu-groups .nav-group {
+    padding: 5px 10px;
+    border-radius: var(--radius);
+    background: var(--glass);
+  }
+
+  .mobile-menu-groups .nav-heading { margin: 4px 8px; }
+  .mobile-menu-groups a { min-height: 44px; overflow-wrap: anywhere; }
+  .mobile-menu-groups a + a { border-top: 1px solid var(--glass-edge); }
+  .mobile-menu-groups .nav-icon { flex: 0 0 16px; }
+
+  .mobile-menu-profile {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    padding: 10px;
+    border-top: 1px solid var(--border);
+  }
+
+  .mobile-menu-profile .logout-button { min-height: 44px; }
+  .mobile-menu-profile strong { overflow-wrap: anywhere; }
+  .mobile-menu-profile .local-error { grid-column: 1 / -1; }
+  .app-footer { padding-bottom: 68px; }
+
+  .help-dock {
+    bottom: calc(var(--mobile-tabs-height) + var(--mobile-dock-gap));
+  }
+
+  .help-dialog[open] {
+    bottom: max(calc(var(--mobile-tabs-height) + var(--mobile-dock-gap)),
+      calc(var(--help-bottom, 0px) + var(--mobile-dock-gap)));
+    max-height: min(49dvh, calc(var(--help-height, 100dvh) - var(--mobile-tabs-height) - 32px));
+  }
+
+  .campus-card {
+    inset-block-end: var(--mobile-tabs-height);
+    max-height: min(44dvh, calc(100dvh - var(--mobile-tabs-height) - 72px));
+  }
+}
+
+.icon-menu::before {
+  position: absolute;
+  inset: 3px 1px auto;
+  height: 1.5px;
+  border-radius: 1px;
+  background: currentColor;
+  box-shadow: 0 4px currentColor, 0 8px currentColor;
+  content: "";
+}

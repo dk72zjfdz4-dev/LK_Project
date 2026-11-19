@@ -13,11 +13,12 @@ const views = {
   updates: 'Уведомления',
   campus: 'Карта кампуса',
   profile: 'Профиль',
+  menu: 'Меню',
 };
 const roleViews = {
   student: Object.keys(views),
-  teacher: ['home', 'grades', 'assignments', 'library', 'messages', 'contacts', 'updates', 'campus', 'profile'],
-  dean: ['home', 'requests', 'library', 'messages', 'contacts', 'updates', 'campus', 'profile'],
+  teacher: ['home', 'grades', 'assignments', 'library', 'messages', 'contacts', 'updates', 'campus', 'profile', 'menu'],
+  dean: ['home', 'requests', 'library', 'messages', 'contacts', 'updates', 'campus', 'profile', 'menu'],
 };
 const roleNames = { student: 'Студент', teacher: 'Преподаватель', dean: 'Деканат' };
 const roleBrand = { student: 'студента', teacher: 'преподавателя', dean: 'деканата' };
@@ -57,7 +58,7 @@ let selectedDialogue;
 let dialogueLoad;
 let lessonOpen;
 let pendingTarget;
-let drawerNavigating = false;
+let menuScroll = 0;
 let pointerNavigation = false;
 let helpNavigationClose = false;
 let searchTimer;
@@ -77,8 +78,6 @@ const messageStates = new Map();
 const renderedMessages = new Map();
 const renders = new Map();
 
-const mobileMenu = byId('mobile-menu');
-const mobileAvatar = byId('mobile-avatar');
 const helpDialog = byId('help-dialog');
 const helpLauncher = byId('help-launcher');
 const messageText = byId('message-text');
@@ -120,7 +119,11 @@ function route(focusHeading = false) {
     openHelp(targetId);
     return;
   }
-  const active = permitted.includes(requested) ? requested : 'home';
+  const active = permitted.includes(requested) && (requested !== 'menu' || mobileLayout.matches) ? requested : 'home';
+  if (requested !== 'help' && helpDialog.open) {
+    helpNavigationClose = true;
+    helpDialog.close();
+  }
   pageHash = requested === 'help' ? '#home' : window.location.hash;
   if (active !== 'campus') closeCampusCard();
   pendingTarget = active === requested && targetId ? targetId : undefined;
@@ -131,7 +134,9 @@ function route(focusHeading = false) {
   }
   for (const link of document.querySelectorAll('[data-view]')) {
     link.hidden = !permitted.includes(link.dataset.view);
-    if (link.dataset.view === active) {
+    const tab = link.closest('.mobile-tabs');
+    const activeTab = ['home', 'schedule', 'messages', 'profile'].includes(active) ? active : 'menu';
+    if (link.dataset.view === (tab ? activeTab : active)) {
       link.setAttribute('aria-current', 'page');
     } else {
       link.removeAttribute('aria-current');
@@ -139,7 +144,7 @@ function route(focusHeading = false) {
   }
   const heading = byId('page-heading');
   heading.textContent = views[active];
-  byId('header-inbox').hidden = active === 'messages';
+  byId('header-inbox').hidden = active !== 'home';
   document.title = views[active] + ' — Личный кабинет';
   renderCabinet();
   if (active === 'requests' && profile.role === 'student') loadHelpCatalog();
@@ -147,7 +152,7 @@ function route(focusHeading = false) {
   heading.classList.toggle('pointer-navigation', pointerNavigation);
   pointerNavigation = false;
   if (focusHeading || pendingTarget) {
-    window.scrollTo(0, 0);
+    window.scrollTo(0, active === 'menu' ? menuScroll : 0);
     heading.focus({ preventScroll: true });
   }
   revealTarget();
@@ -182,7 +187,8 @@ function showLogin(message = '', focusHeading = false) {
   messageStates.clear();
   renderedMessages.clear();
   pendingTarget = undefined;
-  drawerNavigating = pointerNavigation = false;
+  menuScroll = 0;
+  pointerNavigation = false;
   composingMessage = false;
   clearSearch();
   helpCatalog = helpCatalogLoad = undefined;
@@ -198,8 +204,6 @@ function showLogin(message = '', focusHeading = false) {
   closeCampusCard();
   byId('campus-room-form').reset();
   byId('campus-room-result').textContent = '';
-  if (mobileMenu.open) mobileMenu.close();
-  document.documentElement.classList.remove('menu-open');
   byId('lesson-dialog').close();
   byId('session-loading').hidden = true;
   byId('app').hidden = true;
@@ -1801,6 +1805,7 @@ byId('help-query').addEventListener('keydown', (event) => {
 helpLauncher.addEventListener('click', () => openHelp());
 
 function navigateFromLink(hash, event) {
+  if (activeView === 'menu') menuScroll = window.scrollY;
   pointerNavigation = event.detail > 0;
   if (helpDialog.open) {
     helpNavigationClose = true;
@@ -1814,7 +1819,7 @@ function navigateFromLink(hash, event) {
 }
 
 document.addEventListener('click', (event) => {
-  const link = event.target.closest('.sidebar a[data-view], #help-dialog a[href^="#"], #header-inbox');
+  const link = event.target.closest('.sidebar a[data-view], .mobile-tabs a, #mobile-nav a, #mobile-avatar, #help-dialog a[href^="#"], #header-inbox');
   if (!link || event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
   navigateFromLink(link.hash, event);
@@ -1892,7 +1897,7 @@ async function logout() {
     if (error.status === 401) {
       showLogin('', true);
     } else {
-      (mobileMenu.open ? mobileError : byId('app-error')).textContent = error.message;
+      (activeView === 'menu' ? mobileError : byId('app-error')).textContent = error.message;
     }
   } finally {
     signingOut = false;
@@ -1904,43 +1909,11 @@ byId('logout').addEventListener('click', logout);
 byId('mobile-logout').addEventListener('click', logout);
 
 const mobileNav = byId('mobile-nav');
-mobileNav.append(...[...document.querySelector('.sidebar .primary-nav').children].map((item) => item.cloneNode(true)));
-mobileAvatar.addEventListener('click', () => {
-  if (!profile || mobileMenu.open || !mobileLayout.matches) return;
-  mobileMenu.showModal();
-  mobileAvatar.setAttribute('aria-expanded', 'true');
-  document.documentElement.classList.add('menu-open');
-});
-mobileNav.addEventListener('click', (event) => {
-  const link = event.target.closest('a[data-view]');
-  if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-  event.preventDefault();
-  drawerNavigating = true;
-  mobileMenu.close();
-  navigateFromLink(link.hash, event);
-});
-mobileMenu.addEventListener('click', (event) => {
-  if (event.target !== mobileMenu) return;
-  const { left, top, right, bottom } = mobileMenu.getBoundingClientRect();
-  if (event.clientX < left || event.clientX >= right || event.clientY < top || event.clientY >= bottom) {
-    mobileMenu.close();
-  }
-});
-mobileMenu.addEventListener('close', () => {
-  mobileAvatar.setAttribute('aria-expanded', 'false');
-  document.documentElement.classList.remove('menu-open');
-  if (drawerNavigating) {
-    drawerNavigating = false;
-    return;
-  }
-  if (profile && mobileLayout.matches) mobileAvatar.focus({ preventScroll: true });
-  if (profile && !mobileLayout.matches) {
-    document.querySelector('.sidebar [aria-current="page"]')?.focus({ preventScroll: true });
-  }
-});
-mobileLayout.addEventListener('change', (event) => {
-  if (!event.matches && mobileMenu.open) mobileMenu.close();
-});
+for (const group of document.querySelectorAll('.sidebar .nav-group')) {
+  const copy = group.cloneNode(true);
+  for (const link of copy.querySelectorAll('[data-view="schedule"], [data-view="messages"]')) link.remove();
+  mobileNav.append(copy);
+}
 
 byId('day-picker').addEventListener('change', (event) => selectDay(event.target.value));
 byId('home-week').addEventListener('change', (event) => selectHomeDay(event.target.value));
@@ -1948,6 +1921,15 @@ for (const button of document.querySelectorAll('[data-schedule-retry]')) {
   button.addEventListener('click', loadSchedule);
 }
 
+mobileLayout.addEventListener('change', () => {
+  if (profile && window.location.hash === '#menu') route(true);
+});
+
+// Route changes restore the menu position explicitly after switching views.
+history.scrollRestoration = 'manual';
+window.addEventListener('scroll', () => {
+  if (activeView === 'menu' && window.location.hash === '#menu') menuScroll = window.scrollY;
+}, { passive: true });
 window.addEventListener('hashchange', () => {
   if (profile) {
     clearSearch();

@@ -92,6 +92,8 @@ const staticFiles = new Map([
   ['/index.html', ['index.html', 'text/html']],
   ['/app.js', ['app.js', 'text/javascript']],
   ['/styles.css', ['styles.css', 'text/css']],
+  ['/desktop-tablet.css', ['desktop-tablet.css', 'text/css']],
+  ['/mobile.css', ['mobile.css', 'text/css']],
 ]);
 
 function isPublicPath(path) {

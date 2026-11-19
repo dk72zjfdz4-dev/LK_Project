@@ -61,11 +61,11 @@ async function capture(page, name) {
   await page.screenshot({ path: `test-results/screenshots/${name}-360.png`, animations: 'disabled' });
 }
 
-for (const width of [360, 440]) {
-  test(`left mobile drawer, focus and layout at ${width} px`, async ({ page, cabinet }) => {
+for (const width of [360, 390, 440]) {
+  test(`mobile tabs, focus and layout at ${width} px`, async ({ page, cabinet }) => {
     await page.setViewportSize({ width, height: width === 440 ? 450 : 800 });
     await login(page, cabinet);
-    const avatar = page.getByRole('button', { name: 'Открыть меню профиля' });
+    const avatar = page.getByRole('link', { name: 'Открыть профиль' });
     await expect(avatar).toHaveText('НР');
     expect((await avatar.boundingBox()).x).toBeLessThan(32);
     await expect(page.getByRole('heading', { name: 'Учебная неделя' })).toBeVisible();
@@ -74,23 +74,32 @@ for (const width of [360, 440]) {
     await page.locator('#home-week').locator('label').first().click();
     await expect(page.locator('#home-day')).toContainText(/зельеварение|заклинания/i);
     await expect(page.getByRole('heading', { name: 'Главная', exact: true })).toBeVisible();
-    await avatar.focus();
-    await page.keyboard.press('Enter');
-    const menu = page.locator('#mobile-menu');
+    const tabs = page.locator('.mobile-tabs');
+    await expect(tabs.getByRole('link')).toHaveCount(5);
+    await expect(page.locator('.sidebar')).toBeHidden();
+    await avatar.click();
+    await expect(page.locator('#page-heading')).toHaveText('Профиль');
+    await expect(tabs.getByRole('link', { name: 'Профиль' })).toHaveAttribute('aria-current', 'page');
+    const menuTab = tabs.getByRole('link', { name: 'Меню' });
+    await menuTab.focus();
+    await page.keyboard.press('Tab');
+    await expect(tabs.getByRole('link', { name: 'Профиль' })).toBeFocused();
+    await expect(tabs.getByRole('link', { name: 'Профиль' })).toHaveCSS('outline-style', 'solid');
+    await menuTab.click();
+    const menu = page.locator('#view-menu');
     await expect(menu).toBeVisible();
-    await expect(menu.getByRole('link', { name: 'Расписание' })).toBeVisible();
-    await expect.poll(async () => Math.abs((await menu.boundingBox())?.x ?? Infinity)).toBeLessThan(1);
-    await fits(page);
+    await expect(menu.getByRole('link', { name: 'Справки и документы' })).toBeVisible();
     if (width === 360) await capture(page, 'menu');
     await menu.getByRole('button', { name: 'Выйти' }).scrollIntoViewIfNeeded();
     await expect(menu.getByRole('button', { name: 'Выйти' })).toBeInViewport();
-    await page.keyboard.press('Escape');
-    await expect(menu).toBeHidden();
-    await expect(avatar).toBeFocused();
-    await expect(avatar).toHaveCSS('outline-style', 'solid');
-    await avatar.click();
-    await menu.getByRole('button', { name: 'Закрыть' }).click();
-    await expect(menu).toBeHidden();
+    const contacts = menu.getByRole('link', { name: 'Контакты' });
+    await contacts.scrollIntoViewIfNeeded();
+    const menuPosition = await page.evaluate(() => globalThis.scrollY);
+    await contacts.click();
+    await expect(menuTab).toHaveAttribute('aria-current', 'page');
+    await page.goBack();
+    await expect(menu).toBeVisible();
+    await expect.poll(() => page.evaluate(() => globalThis.scrollY)).toBeGreaterThanOrEqual(menuPosition - 120);
     await page.locator('#help-launcher').click();
     const helper = page.locator('#help-dialog');
     await expect(helper).toBeVisible();
@@ -122,8 +131,8 @@ test('mobile search opens the document form and campus opens the chosen card', a
   const form = page.locator('#document-enrollment');
   await expect(form.getByRole('button', { name: 'Подать заявку' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Открыть меню профиля' }).click();
-  await page.locator('#mobile-menu').getByRole('link', { name: 'Карта кампуса' }).click();
+  await page.locator('.mobile-tabs').getByRole('link', { name: 'Меню' }).click();
+  await page.locator('#view-menu').getByRole('link', { name: 'Карта кампуса' }).click();
   await page.getByRole('button', { name: 'Корпус Б', exact: true }).click();
   const card = page.locator('#campus-card');
   await expect(card.getByRole('heading', { name: 'Корпус Б' })).toBeVisible();
@@ -296,8 +305,13 @@ for (const [label, width, height] of [['desktop', 1440, 980], ['360', 360, 800],
     await page.mouse.wheel(0, 350);
     await expect.poll(() => page.evaluate(() => globalThis.scrollY)).toBeGreaterThan(initialScroll);
     for (const name of ['Главная', 'Успеваемость', 'Расписание', 'Справки и документы', 'Библиотека', 'Главная']) {
-      const navigation = width > 1100 ? page.locator('.sidebar nav') : page.locator('#mobile-menu');
-      if (width < 1100) await page.locator('#mobile-avatar').click();
+      const tabs = page.locator('.mobile-tabs');
+      const mainTab = ['Главная', 'Расписание'].includes(name);
+      const navigation = width > 680 ? page.locator('.sidebar nav') : mainTab ? tabs : page.locator('#mobile-nav');
+      if (width <= 680 && !mainTab) {
+        await tabs.getByRole('link', { name: 'Меню' }).click();
+        await expect(dialog).toBeHidden();
+      }
       await navigation.getByRole('link', { name, exact: true }).click();
       await expect(page.locator('#page-heading')).toHaveText(name);
       await expect(dialog).toBeHidden();
@@ -397,3 +411,53 @@ test('assistant icon controls respond to touch and navigation actions preserve h
     await context.close();
   }
 });
+
+for (const [width, height] of [[768, 1024], [1024, 768], [1440, 980]]) {
+  test(`sidebar tablet and desktop at ${width}×${height}`, async ({ page, cabinet }) => {
+    await page.setViewportSize({ width, height });
+    await login(page, cabinet);
+    const nav = page.locator('.sidebar nav');
+    await expect(nav).toBeVisible();
+    await expect(page.locator('.mobile-tabs')).toBeHidden();
+    await expect(nav.getByRole('link', { name: 'Расписание' })).toBeVisible();
+    await expect(page.locator('#header-inbox')).toBeVisible();
+    const heading = page.locator('#page-heading');
+    for (const [view, name, selector] of [['schedule', 'Расписание', '#week-grid'], ['requests', 'Справки и документы', '#document-enrollment'], ['messages', 'Сообщения', '#dialogues-content']]) {
+      await nav.locator('[data-view="' + view + '"]').click();
+      await expect(heading).toHaveText(name);
+      await expect(page.locator(selector)).toBeVisible();
+      await expect(page.locator('#header-inbox')).toBeHidden();
+      await fits(page);
+    }
+    await page.getByRole('button', { name: /Деканат/ }).click();
+    await expect(page.locator('#message-text')).toBeVisible();
+    await fits(page);
+    await nav.getByRole('link', { name: 'Главная' }).click();
+    await page.screenshot({ path: `test-results/screenshots/home-${width}.png`, animations: 'disabled' });
+  });
+}
+
+test('mobile and sidebar navigation do not duplicate at the transition', async ({ page, cabinet }) => {
+  await page.setViewportSize({ width: 680, height: 760 });
+  await login(page, cabinet);
+  await expect(page.locator('.mobile-tabs')).toBeVisible();
+  await page.locator('.mobile-tabs').getByRole('link', { name: 'Меню' }).click();
+  await page.setViewportSize({ width: 681, height: 760 });
+  await expect(page.locator('.mobile-tabs')).toBeHidden();
+  await expect(page.locator('.sidebar nav')).toBeVisible();
+  await expect(page.locator('#view-menu')).toBeHidden();
+  await fits(page);
+});
+
+for (const [role, unavailable] of [['teacher', 'Справки и документы'], ['dean', 'Успеваемость']]) {
+  test(`mobile navigation respects ${role} role`, async ({ page, cabinet }) => {
+    await page.setViewportSize({ width: 390, height: 650 });
+    await login(page, cabinet, role);
+    const tabs = page.locator('.mobile-tabs');
+    await expect(tabs.getByRole('link', { name: 'Расписание' })).toHaveCount(0);
+    await tabs.getByRole('link', { name: 'Меню' }).click();
+    await expect(page.locator('#mobile-nav').getByRole('link', { name: unavailable })).toHaveCount(0);
+    await expect(page.locator('#mobile-nav').getByRole('link', { name: 'Библиотека' })).toBeVisible();
+    await fits(page);
+  });
+}

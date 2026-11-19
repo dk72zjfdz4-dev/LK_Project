@@ -290,20 +290,3 @@ test('campus card selects each symbol, closes and returns focus', () => {
     assert.equal(byId('campus-card').hidden, true);
   }
 });
-
-test('mobile drawer closes on the backdrop and keeps clicks inside the drawer', () => {
-  let click;
-  let closes = 0;
-  const mobileMenu = {
-    addEventListener(_event, handler) { click = handler; },
-    close() { closes++; },
-    getBoundingClientRect: () => ({ left: 0, top: 0, right: 315, bottom: 700 }),
-  };
-  runInNewContext(section("mobileMenu.addEventListener('click'", "mobileMenu.addEventListener('close'"), { mobileMenu });
-  click({ target: mobileMenu, clientX: 120, clientY: 600 });
-  assert.equal(closes, 0);
-  click({ target: {}, clientX: 340, clientY: 600 });
-  assert.equal(closes, 0);
-  click({ target: mobileMenu, clientX: 340, clientY: 600 });
-  assert.equal(closes, 1);
-});
