@@ -205,7 +205,7 @@ test('library searches titles and authors, filters disciplines and remembers a f
   await expect(books.getByText('Наблюдения за ночным небом', { exact: true })).toHaveCount(0);
 });
 
-for (const [label, width, height] of [['desktop', 1440, 980], ['360', 360, 800]]) {
+for (const [label, width, height] of [['desktop', 1440, 980], ['360', 360, 800], ['440', 440, 800]]) {
   test(`glass surfaces and assistant at ${label}`, async ({ page, cabinet }) => {
     await page.setViewportSize({ width, height });
     await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -235,10 +235,37 @@ for (const [label, width, height] of [['desktop', 1440, 980], ['360', 360, 800]]
     expect(box.top).toBeGreaterThanOrEqual(0);
     expect(box.right).toBeLessThanOrEqual(width);
     expect(box.bottom).toBeLessThanOrEqual(height);
+    if (label === 'desktop') {
+      const workspace = await page.locator('.workspace').boundingBox();
+      expect(workspace.x + workspace.width).toBeLessThanOrEqual(box.left);
+    }
     await page.keyboard.press('Tab');
     await expect(dialog.getByRole('button', { name: 'Закрыть' })).toBeFocused();
     await expect(dialog.getByRole('button', { name: 'Закрыть' })).toHaveCSS('outline-style', 'solid');
     await page.screenshot({ path: `test-results/glass/helper-${label}.png`, animations: 'disabled' });
+    await page.keyboard.press('Shift+Tab');
+    await expect(launcher).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(dialog.getByRole('button', { name: 'Закрыть' })).toBeFocused();
+    await input.fill('Черновик вопроса');
+    expect(await dialog.evaluate((node) => node.matches(':modal'))).toBe(false);
+    const initialScroll = await page.evaluate(() => globalThis.scrollY);
+    await page.mouse.move(width > 1100 ? 350 : 30, 180);
+    await page.mouse.wheel(0, 350);
+    await expect.poll(() => page.evaluate(() => globalThis.scrollY)).toBeGreaterThan(initialScroll);
+    for (const name of ['Расписание', 'Справки и документы', 'Библиотека', 'Главная']) {
+      const navigation = width > 1100 ? page.locator('.sidebar nav') : page.locator('#mobile-menu');
+      if (width < 1100) await page.locator('#mobile-avatar').click();
+      await navigation.getByRole('link', { name, exact: true }).click();
+      await expect(page.locator('#page-heading')).toHaveText(name);
+      await expect(dialog).toBeVisible();
+      await expect(input).toHaveValue('Черновик вопроса');
+      await fits(page);
+    }
+    await page.locator('#page-heading').focus();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeVisible();
+    await input.focus();
     await page.keyboard.press('Escape');
     await expect(dialog).toBeHidden();
     await expect(launcher).toBeFocused();

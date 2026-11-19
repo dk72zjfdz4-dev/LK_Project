@@ -118,7 +118,6 @@ function route(focusHeading = false) {
   }
   const active = permitted.includes(requested) ? requested : 'home';
   pageHash = requested === 'help' ? '#home' : window.location.hash;
-  if (requested !== 'help' && helpDialog.open) helpDialog.close();
   if (active !== 'campus') closeCampusCard();
   pendingTarget = active === requested && targetId ? targetId : undefined;
   activeView = active;
@@ -1053,11 +1052,8 @@ function openHelp(target) {
   if (!profile) return;
   helpTarget = target;
   if (!helpDialog.open) {
-    byId('faq-content').querySelectorAll('details[open]').forEach((details) => { details.open = false; });
-    byId('help-dialog').querySelector('.help-dialog-content').scrollTop = 0;
-    helpDialog.showModal();
+    helpDialog.show();
     helpLauncher.setAttribute('aria-expanded', 'true');
-    document.documentElement.classList.add('help-open');
     sizeHelpDialog();
   }
   loadHelpCatalog();
@@ -1705,23 +1701,19 @@ byId('faq-retry').addEventListener('click', loadHelpCatalog);
 byId('help-form').addEventListener('submit', askHelp);
 byId('help-query').addEventListener('input', clearHelpAnswer);
 helpLauncher.addEventListener('click', () => openHelp());
-helpDialog.addEventListener('click', (event) => {
-  const link = event.target.closest('a[href^="#"]');
-  if (!link || link.hash !== window.location.hash || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+helpDialog.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
   event.preventDefault();
   helpDialog.close();
-  route(true);
 });
 helpDialog.addEventListener('close', () => {
   if (helpDialog.open) return;
   helpLauncher.setAttribute('aria-expanded', 'false');
-  document.documentElement.classList.remove('help-open');
   helpTarget = undefined;
-  resetHelpQuestion();
   if (profile && /^#help(?:\/|$)/.test(window.location.hash)) {
     history.replaceState(null, '', window.location.pathname + window.location.search + pageHash);
-    helpLauncher.focus({ preventScroll: true });
   }
+  if (profile) helpLauncher.focus({ preventScroll: true });
 });
 window.visualViewport?.addEventListener('resize', sizeHelpDialog);
 window.visualViewport?.addEventListener('scroll', sizeHelpDialog);
