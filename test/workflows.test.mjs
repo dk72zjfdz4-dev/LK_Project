@@ -80,6 +80,14 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   const dean = await login('dean1', 'dean');
   const cabinet = (cookie) => expect('/cabinet', cookie);
   const initial = await cabinet(student);
+  await expect('/library', null, undefined, 401);
+  const { books } = await expect('/library', student);
+  assert.equal(books.length, 9);
+  const bookPath = '/library/' + books[0].id + '/favorite';
+  await expect(bookPath, student, { favorite: 'true' }, 400);
+  await expect('/library/999/favorite', student, { favorite: true }, 404);
+  await expect(bookPath, student, { favorite: true, accountId: 2 });
+  assert.equal((await expect('/library', other)).books[0].favorite, false);
   assert.ok(initial.contacts.length);
   assert.ok(initial.contacts.every(({ email }) => email.endsWith('@example.com')));
   const search = (query, cookie) => expect('/search?q=' + encodeURIComponent(query), cookie);
@@ -249,6 +257,9 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   await stop();
   await start();
   const persisted = await cabinet(student);
+  assert.equal((await expect('/library', student)).books[0].favorite, true);
+  await expect(bookPath, student, { favorite: false });
+  assert.equal((await expect('/library', student)).books[0].favorite, false);
   assert.ok(documents.every(({ title }) => persisted.requests.some(({ type }) => type === title)));
   const withdrawn = persisted.appeals.find(({ id }) => id === pending.id);
   assert.equal(withdrawn.status, 'withdrawn');

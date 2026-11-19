@@ -26,7 +26,7 @@ test('an open student cabinet refreshes the schedule through midnight', async ()
   let tick;
   let today = '2026-11-22';
   let shown;
-  const node = {};
+  const node = { closest() { return this; } };
   const avatar = {};
   const context = {
     byId: (id) => id === 'mobile-avatar' ? avatar : node,
@@ -37,7 +37,7 @@ test('an open student cabinet refreshes the schedule through midnight', async ()
     renderWeek: (_lessons, date) => { shown = date; },
     setHeaderDate() {}, moscowTimeFormat: { format: () => "00:05" },
     request: async () => ({ today, weekStart: today, lessons: [] }),
-    profile: undefined, selectedDay: undefined, schedule: undefined, pollTimer: undefined, scheduleLoad: undefined,
+    profile: undefined, selectedHomeDay: undefined, selectedDay: undefined, schedule: undefined, pollTimer: undefined, scheduleLoad: undefined,
     renders: new Map(),
   };
   runInNewContext(section('function showApp(', 'function dateAt(')

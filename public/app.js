@@ -6,18 +6,18 @@ const views = {
   schedule: 'Расписание',
   grades: 'Успеваемость',
   assignments: 'Задания',
+  library: 'Библиотека',
   requests: 'Справки и документы',
   messages: 'Сообщения',
   contacts: 'Контакты',
   updates: 'Уведомления',
   campus: 'Карта кампуса',
-  help: 'Помощник по кабинету',
   profile: 'Профиль',
 };
 const roleViews = {
   student: Object.keys(views),
-  teacher: ['home', 'grades', 'assignments', 'messages', 'contacts', 'updates', 'campus', 'help', 'profile'],
-  dean: ['home', 'requests', 'messages', 'contacts', 'updates', 'campus', 'help', 'profile'],
+  teacher: ['home', 'grades', 'assignments', 'library', 'messages', 'contacts', 'updates', 'campus', 'profile'],
+  dean: ['home', 'requests', 'library', 'messages', 'contacts', 'updates', 'campus', 'profile'],
 };
 const roleNames = { student: 'Студент', teacher: 'Преподаватель', dean: 'Деканат' };
 const roleBrand = { student: 'студента', teacher: 'преподавателя', dean: 'деканата' };
@@ -52,6 +52,7 @@ let cabinet;
 let cabinetLoad;
 let pollTimer;
 let selectedDay;
+let selectedHomeDay;
 let selectedDialogue;
 let dialogueLoad;
 let lessonOpen;
@@ -62,6 +63,11 @@ let searchLoad;
 let helpCatalog;
 let helpCatalogLoad;
 let helpQuestionLoad;
+let helpTarget;
+let pageHash = '';
+let library;
+let libraryLoad;
+const librarySaves = new Set();
 let composingMessage = false;
 const messageStates = new Map();
 const renderedMessages = new Map();
@@ -69,6 +75,8 @@ const renders = new Map();
 
 const mobileMenu = byId('mobile-menu');
 const mobileAvatar = byId('mobile-avatar');
+const helpDialog = byId('help-dialog');
+const helpLauncher = byId('help-launcher');
 const messageText = byId('message-text');
 const messageForm = byId('message-form');
 const emojiOptions = byId('emoji-options');
@@ -104,9 +112,14 @@ async function request(path, options) {
 function route(focusHeading = false) {
   const [requested, targetId] = window.location.hash.slice(1).split('/');
   const permitted = roleViews[profile.role];
+  if (requested === 'help' && activeView) {
+    openHelp(targetId);
+    return;
+  }
   const active = permitted.includes(requested) ? requested : 'home';
+  pageHash = requested === 'help' ? '#home' : window.location.hash;
+  if (requested !== 'help' && helpDialog.open) helpDialog.close();
   if (active !== 'campus') closeCampusCard();
-  if (activeView === 'help' && active !== 'help') resetHelpQuestion();
   pendingTarget = active === requested && targetId ? targetId : undefined;
   activeView = active;
   byId('app-error').textContent = '';
@@ -126,7 +139,8 @@ function route(focusHeading = false) {
   byId('header-inbox').hidden = active === 'messages';
   document.title = views[active] + ' — Личный кабинет';
   renderCabinet();
-  if (active === 'help' || (active === 'requests' && profile.role === 'student')) loadHelpCatalog();
+  if (active === 'requests' && profile.role === 'student') loadHelpCatalog();
+  if (active === 'library') loadLibrary();
   const fromDrawer = drawerDestination === window.location.hash;
   drawerDestination = undefined;
   if (focusHeading || pendingTarget) {
@@ -134,6 +148,7 @@ function route(focusHeading = false) {
     if (!fromDrawer) heading.focus({ preventScroll: true });
   }
   revealTarget();
+  if (requested === 'help') openHelp(targetId);
   if (active === 'messages' && selectedDialogue !== undefined) refreshDialogue();
 }
 
@@ -158,7 +173,7 @@ function preservePagePosition(update) {
 
 function showLogin(message = '', focusHeading = false) {
   profile = undefined;
-  schedule = scheduleLoad = cabinet = cabinetLoad = selectedDay = selectedDialogue = dialogueLoad = lessonOpen = undefined;
+  activeView = schedule = scheduleLoad = cabinet = cabinetLoad = selectedDay = selectedHomeDay = selectedDialogue = dialogueLoad = lessonOpen = undefined;
   window.clearInterval(pollTimer);
   renders.clear();
   messageStates.clear();
@@ -167,7 +182,15 @@ function showLogin(message = '', focusHeading = false) {
   composingMessage = false;
   clearSearch();
   helpCatalog = helpCatalogLoad = undefined;
+  helpTarget = undefined;
+  pageHash = '';
+  if (helpDialog.open) helpDialog.close();
   resetHelpQuestion();
+  library = libraryLoad = undefined;
+  librarySaves.clear();
+  byId('library-filters').reset();
+  byId('library-subject').options.length = 1;
+  byId('library-retry').hidden = true;
   closeCampusCard();
   byId('campus-room-form').reset();
   byId('campus-room-result').textContent = '';
@@ -183,6 +206,7 @@ function showLogin(message = '', focusHeading = false) {
   byId('cabinet-status').hidden = true;
   byId('home-stats').hidden = true;
   byId('home-staff').hidden = true;
+  byId('home-cabinet').hidden = true;
   byId('messaging').hidden = true;
   messageForm.hidden = true;
   messageForm.reset();
@@ -192,17 +216,20 @@ function showLogin(message = '', focusHeading = false) {
   byId('dialogue-error').textContent = '';
   byId('messages-content').replaceChildren(element('p', 'empty-state', 'Выберите диалог.'));
   updateUnread(0);
-  byId('day-picker').querySelectorAll('label').forEach((label) => label.remove());
+  for (const picker of [byId('day-picker'), byId('home-week')]) {
+    picker.querySelectorAll('label').forEach((label) => label.remove());
+  }
   for (const id of [
-    'week-grid', 'upcoming-lessons', 'changed-lessons', 'home-week', 'home-week-label', 'home-stats',
+    'week-grid', 'upcoming-lessons', 'changed-lessons', 'home-day', 'home-week-label', 'home-stats',
     'home-cabinet', 'home-staff', 'grades-content', 'assignments-content', 'requests-content',
     'dialogues-content', 'updates-content', 'contacts-content', 'dialogue-contact', 'lesson-dialog-content', 'action-status',
     'documents-content', 'faq-content', 'document-catalog-status', 'faq-status',
+    'library-results', 'library-status', 'library-error',
   ]) byId(id).replaceChildren();
   for (const id of [
     ...Object.keys(profileFields),
-    'sidebar-name', 'sidebar-initials', 'profile-initials', 'welcome-name', 'welcome-summary',
-    'mobile-avatar', 'mobile-menu-name', 'mobile-menu-role', 'mobile-logout-error',
+    'sidebar-name', 'sidebar-initials', 'profile-initials', 'welcome-name',
+    'mobile-avatar', 'mobile-menu-initials', 'mobile-menu-name', 'mobile-menu-role', 'mobile-logout-error',
   ]) {
     byId(id).textContent = '';
   }
@@ -222,22 +249,22 @@ function showApp(account, focusHeading = false) {
     .join('')
     .toLocaleUpperCase('ru-RU');
   const roleName = roleNames[profile.role];
+  const groupOrRole = profile.role === 'student' ? account.group || roleName : roleName;
   byId('mobile-avatar').textContent = initials;
+  byId('mobile-menu-initials').textContent = initials;
   byId('mobile-menu-name').textContent = account.fullName;
-  byId('mobile-menu-role').textContent = roleName;
+  byId('mobile-menu-role').textContent = groupOrRole;
   byId('sidebar-initials').textContent = initials;
   byId('profile-initials').textContent = initials;
   byId('sidebar-name').textContent = account.fullName;
   byId('welcome-name').textContent = (profile.role === 'student' ? 'Привет, ' : 'Здравствуйте, ') + (account.firstName || account.fullName) + '!';
-  byId('welcome-summary').textContent = profile.role === 'student'
-    ? [account.group, account.year && account.year + ' курс'].filter(Boolean).join(' · ')
-    : [roleName, account.faculty].filter(Boolean).join(' · ');
   byId('brand-role').textContent = roleBrand[profile.role];
   byId('profile-role').textContent = roleName;
-  byId('sidebar-group').textContent = profile.role === 'student' ? account.group : roleName;
+  byId('sidebar-group').textContent = groupOrRole;
   byId('document-catalog').hidden = profile.role !== 'student';
   byId('home-status').hidden = true;
   byId('home-schedule').hidden = true;
+  byId('home-week').closest('section').hidden = true;
   byId('session-loading').hidden = true;
   byId('login-screen').hidden = true;
   byId('app').hidden = false;
@@ -347,7 +374,7 @@ function renderHome(lessons, nextWeekLessons, today) {
     .filter((lesson) => !lesson.cancelled && (lesson.date > today || (lesson.date === today && lesson.end > now)))
     .sort(lessonOrder);
   renderList(
-    byId('upcoming-lessons'), upcoming.slice(0, 4), (lesson) => upcomingRow(lesson, today),
+    byId('upcoming-lessons'), upcoming.slice(0, 1), (lesson) => upcomingRow(lesson, today),
     'Ближайших занятий в расписании нет.',
   );
   const changed = [...lessons, ...nextWeekLessons]
@@ -365,6 +392,23 @@ function selectDay(date) {
   for (const column of byId('week-grid').children) {
     column.dataset.selected = String(column.dataset.date === date);
   }
+}
+
+function selectHomeDay(date) {
+  selectedHomeDay = date;
+  for (const input of byId('home-week').querySelectorAll('input')) input.checked = input.value === date;
+  const day = byId('home-day');
+  const heading = element('h3', 'home-day-heading', dayFormat.format(dateAt(date)));
+  const lessons = schedule.lessons.filter((lesson) => lesson.date === date);
+  const contents = element('div');
+  renderList(contents, lessons, (lesson) => {
+    const row = element('li', 'home-day-row');
+    row.append(element('p', 'lesson-time', lessonTimes(lesson)), lessonTitle(lesson, 'h4'), lessonDetails(lesson));
+    if (lesson.cancelled) row.classList.add('calendar-cancelled');
+    if (lesson.change || lesson.cancelled) row.append(element('p', 'change-label', lesson.change || 'Занятие отменено.'));
+    return row;
+  }, 'В этот день занятий нет.');
+  day.replaceChildren(heading, contents);
 }
 
 function calendarDay(date, day, today, lessons) {
@@ -403,9 +447,10 @@ function renderWeek(lessons, today, start) {
   const picker = byId('day-picker');
   const grid = byId('week-grid');
   const homeWeek = byId('home-week');
+  const focusedHomeDay = homeWeek.contains(document.activeElement) ? document.activeElement.value : undefined;
   picker.querySelectorAll('label').forEach((label) => label.remove());
   grid.replaceChildren();
-  homeWeek.replaceChildren();
+  homeWeek.querySelectorAll('label').forEach((label) => label.remove());
   byId('home-week-label').textContent = byId('week-label').textContent;
 
   for (const [index, isoDate] of isoDates.entries()) {
@@ -421,16 +466,25 @@ function renderWeek(lessons, today, start) {
     chip.append(element('span', '', shortWeekdays[index]), element('strong', '', dates[index].getUTCDate()));
     label.append(input, chip);
     picker.append(label);
-    grid.append(calendarDay(isoDate, index, today, lessons.filter((lesson) => lesson.date === isoDate)));
-    const count = lessons.filter((lesson) => lesson.date === isoDate && !lesson.cancelled).length;
-    const dayLink = anchor('#schedule', 'mini-day');
-    if (isoDate === today) dayLink.setAttribute('aria-current', 'date');
-    dayLink.setAttribute('aria-label', dayFormat.format(dates[index]) + ', занятий: ' + count);
-    dayLink.append(element('span', '', shortWeekdays[index]), element('strong', '', dates[index].getUTCDate()), element('span', 'mini-day-count', count ? String(count) : '—'));
-    dayLink.addEventListener('click', () => selectDay(isoDate));
-    homeWeek.append(dayLink);
+    const dayLessons = lessons.filter((lesson) => lesson.date === isoDate);
+    grid.append(calendarDay(isoDate, index, today, dayLessons));
+    const count = dayLessons.filter((lesson) => !lesson.cancelled).length;
+    const homeLabel = label.cloneNode(true);
+    const homeInput = homeLabel.querySelector('input');
+    homeInput.name = 'home-visible-day';
+    homeInput.setAttribute('aria-label', input.getAttribute('aria-label') + ', занятий: ' + count);
+    homeInput.setAttribute('aria-controls', 'home-day');
+    if (isoDate === today) homeInput.setAttribute('aria-current', 'date');
+    const homeChip = homeLabel.querySelector('.day-chip');
+    homeChip.className = 'mini-day';
+    homeChip.append(element('span', 'mini-day-count', count ? String(count) : '—'));
+    homeWeek.append(homeLabel);
   }
   selectDay(isoDates.includes(selectedDay) ? selectedDay : active);
+  selectHomeDay(isoDates.includes(selectedHomeDay) ? selectedHomeDay : active);
+  if (focusedHomeDay) {
+    [...homeWeek.querySelectorAll('input')].find((input) => input.value === focusedHomeDay)?.focus({ preventScroll: true });
+  }
 }
 
 function showScheduleStatus(message = '', canRetry = false) {
@@ -460,10 +514,11 @@ async function loadSchedule({ quiet = false } = {}) {
       const calendarKey = JSON.stringify([today, weekStart, lessons]);
       if (renders.get('calendar') !== calendarKey) {
         if (selectedDay === schedule?.today) selectedDay = today;
+        if (selectedHomeDay === schedule?.today) selectedHomeDay = today;
+        schedule = { today, lessons };
         renderWeek(lessons, today, weekStart);
         renders.set('calendar', calendarKey);
       }
-      schedule = { today, lessons };
       const now = moscowTimeFormat.format(new Date());
       const ended = lessons.filter((lesson) => lesson.date === today && !lesson.cancelled && lesson.end <= now).length;
       const homeKey = JSON.stringify([calendarKey, nextWeekLessons, ended]);
@@ -709,18 +764,11 @@ function renderDashboard() {
     .filter((item) => !item.submission && new Date(item.dueAt).getTime() >= now)
     .sort((a, b) => a.dueAt.localeCompare(b.dueAt))
     .slice(0, 3) : [];
-  const recentKey = JSON.stringify([
-    profile.role, schedule?.today, schedule?.lessons, cabinet?.unreadCount, cabinet?.requests, cabinet?.assignments, deadlines,
-  ]);
+  const recentKey = JSON.stringify([profile.role, cabinet?.unreadCount, cabinet?.requests, cabinet?.assignments, deadlines]);
   if (renders.get('dashboard') === recentKey) return;
   renders.set('dashboard', recentKey);
   const focused = document.activeElement?.id;
   const cards = [];
-  if (student) {
-    const todayCard = stat('#schedule', schedule ? schedule.lessons.filter((lesson) => lesson.date === schedule.today && !lesson.cancelled).length : '—', 'Пар сегодня');
-    todayCard.addEventListener('click', () => { if (schedule) selectDay(schedule.today); });
-    cards.push(todayCard);
-  }
   if (student || profile.role === 'teacher') cards.push(stat('#assignments', pendingAssignments ?? '—', student ? 'Заданий к сдаче' : 'Работ на проверке'));
   if (student || profile.role === 'dean') cards.push(stat('#requests', activeRequests ?? '—', 'Открытых заявок'));
   cards.push(stat('#messages', cabinet?.unreadCount ?? '—', 'Непрочитанных сообщений'));
@@ -733,14 +781,16 @@ function renderDashboard() {
     const deadlinePanel = panel('Ближайшие дедлайны', listFor(deadlines, (item) => {
       const row = element('div', 'record-line');
       const info = element('div');
-      info.append(element('h3', 'lesson-title', item.title), element('p', 'muted', item.subject));
+      const title = element('h3', 'lesson-title');
+      title.append(anchor('#assignments/assignment-' + item.id, 'inline-link', item.title));
+      info.append(title, element('p', 'muted', item.subject));
       const deadline = element('time', 'deadline-date', eventTime(item.dueAt));
       deadline.dateTime = item.dueAt;
       row.append(info, deadline);
       return row;
     }, cabinet ? 'Ближайших дедлайнов нет.' : 'Загружаем задания…'));
     byId('home-cabinet').replaceChildren(deadlinePanel);
-    byId('home-schedule').hidden = false;
+    byId('home-cabinet').hidden = false;
     return;
   }
 
@@ -982,6 +1032,38 @@ function answerContent(answer, label) {
   return [text, anchor(hash, 'button button-secondary help-link', label ?? 'Перейти в раздел «' + views[answer.view] + '»')];
 }
 
+function revealHelpTarget() {
+  if (!helpTarget || !helpDialog.open) return;
+  const target = byId(helpTarget);
+  if (!target || !byId('faq-content').contains(target)) return;
+  helpTarget = undefined;
+  target.open = true;
+  target.querySelector('summary').focus({ preventScroll: true });
+  target.scrollIntoView({ block: 'nearest' });
+}
+
+function sizeHelpDialog() {
+  const viewport = window.visualViewport;
+  if (!viewport || !helpDialog.open) return;
+  helpDialog.style.setProperty('--help-height', viewport.height + 'px');
+  helpDialog.style.setProperty('--help-bottom', Math.max(0, window.innerHeight - viewport.offsetTop - viewport.height) + 'px');
+}
+
+function openHelp(target) {
+  if (!profile) return;
+  helpTarget = target;
+  if (!helpDialog.open) {
+    byId('faq-content').querySelectorAll('details[open]').forEach((details) => { details.open = false; });
+    byId('help-dialog').querySelector('.help-dialog-content').scrollTop = 0;
+    helpDialog.showModal();
+    helpLauncher.setAttribute('aria-expanded', 'true');
+    document.documentElement.classList.add('help-open');
+    sizeHelpDialog();
+  }
+  loadHelpCatalog();
+  revealHelpTarget();
+}
+
 async function loadHelpCatalog() {
   if (!profile || helpCatalog || helpCatalogLoad) return;
   const account = profile;
@@ -1004,6 +1086,7 @@ async function loadHelpCatalog() {
     for (const area of areas) byId(area + '-status').textContent = '';
     helpCatalog = payload;
     revealTarget();
+    revealHelpTarget();
   } catch (error) {
     if (!current() || endSession(error)) return;
     for (const area of areas) {
@@ -1036,7 +1119,7 @@ async function askHelp(event) {
   const load = { controller: new AbortController() };
   helpQuestionLoad = load;
   byId('help-status').textContent = 'Ищем ответ…';
-  const current = () => profile === account && helpQuestionLoad === load && activeView === 'help';
+  const current = () => profile === account && helpQuestionLoad === load && helpDialog.open;
   try {
     const { answer, found } = await request('/api/help?q=' + encodeURIComponent(query), { signal: load.controller.signal });
     if (!current()) return;
@@ -1049,6 +1132,89 @@ async function askHelp(event) {
     if (current() && !endSession(error)) byId('help-status').textContent = error.message;
   } finally {
     if (helpQuestionLoad === load) helpQuestionLoad = undefined;
+  }
+}
+
+function renderLibrary() {
+  if (!library) return;
+  const query = byId('library-query').value.trim().toLocaleLowerCase('ru-RU').replaceAll('ё', 'е');
+  const subject = byId('library-subject').value;
+  const favorites = byId('library-favorites').checked;
+  const books = library.filter((book) => (
+    (!subject || book.subject === subject) &&
+    (!favorites || book.favorite) &&
+    [book.title, book.author].some((text) => text.toLocaleLowerCase('ru-RU').replaceAll('ё', 'е').includes(query))
+  ));
+  const root = byId('library-results');
+  const focusedId = root.contains(document.activeElement) ? document.activeElement.id : '';
+  const results = listFor(books, (book) => {
+    const card = element('article', 'library-book');
+    const info = element('div', 'library-book-info');
+    const favorite = element('button', 'button button-secondary library-favorite', book.favorite ? 'В избранном' : 'В избранное');
+    favorite.id = 'library-favorite-' + book.id;
+    favorite.type = 'button';
+    favorite.setAttribute('aria-label', (book.favorite ? 'Убрать из избранного: ' : 'В избранное: ') + book.title);
+    favorite.setAttribute('aria-pressed', String(book.favorite));
+    if (librarySaves.has(book.id)) favorite.setAttribute('aria-disabled', 'true');
+    favorite.addEventListener('click', () => saveFavorite(book, favorite));
+    info.append(
+      element('h3', '', book.title),
+      element('p', 'muted', book.author),
+      element('p', 'library-subject', book.subject),
+      element('p', 'record-copy', book.description),
+    );
+    card.append(info, favorite);
+    return card;
+  }, favorites && !query && !subject ? 'В избранном пока нет книг.' : 'По вашему запросу ничего не найдено');
+  root.replaceChildren(results);
+  const status = byId('library-status');
+  status.classList.toggle('visually-hidden', !books.length);
+  status.textContent = books.length ? 'Найдено книг: ' + books.length : results.textContent;
+  if (focusedId) (byId(focusedId) || byId('library-favorites')).focus({ preventScroll: true });
+}
+
+async function loadLibrary() {
+  if (!profile || library || libraryLoad) return;
+  const account = profile;
+  const load = {};
+  libraryLoad = load;
+  byId('library-status').textContent = 'Загружаем каталог…';
+  byId('library-error').textContent = '';
+  byId('library-retry').hidden = true;
+  try {
+    const { books } = await request('/api/library');
+    if (profile !== account || libraryLoad !== load) return;
+    const subjects = [...new Set(books.map((book) => book.subject))].sort((a, b) => a.localeCompare(b, 'ru'));
+    for (const subject of subjects) byId('library-subject').add(new Option(subject, subject));
+    library = books;
+    renderLibrary();
+  } catch (error) {
+    if (profile !== account || endSession(error)) return;
+    byId('library-status').textContent = '';
+    byId('library-error').textContent = error.message;
+    byId('library-retry').hidden = false;
+  } finally {
+    if (libraryLoad === load) libraryLoad = undefined;
+  }
+}
+
+async function saveFavorite(book, button) {
+  const account = profile;
+  if (!account || librarySaves.has(book.id)) return;
+  const favorite = !book.favorite;
+  librarySaves.add(book.id);
+  button.setAttribute('aria-disabled', 'true');
+  byId('library-error').textContent = '';
+  try {
+    await post(resource('/api/library', book.id, '/favorite'), { favorite });
+    if (profile === account) book.favorite = favorite;
+  } catch (error) {
+    if (profile === account && !endSession(error)) byId('library-error').textContent = error.message;
+  } finally {
+    if (profile === account) {
+      librarySaves.delete(book.id);
+      renderLibrary();
+    }
   }
 }
 
@@ -1471,7 +1637,7 @@ async function runSearch(query, account, load) {
   try {
     const { results } = await request('/api/search?q=' + encodeURIComponent(query), { signal: load.controller.signal });
     if (!current()) return;
-    const matching = results.filter((item) => roleViews[account.role].includes(item.view));
+    const matching = results.filter((item) => item.view === 'help' || roleViews[account.role].includes(item.view));
     for (const item of matching) {
       const row = element('li');
       const hash = '#' + item.view + (item.id ? '/' + item.id : '');
@@ -1538,6 +1704,32 @@ byId('document-catalog-retry').addEventListener('click', loadHelpCatalog);
 byId('faq-retry').addEventListener('click', loadHelpCatalog);
 byId('help-form').addEventListener('submit', askHelp);
 byId('help-query').addEventListener('input', clearHelpAnswer);
+helpLauncher.addEventListener('click', () => openHelp());
+helpDialog.addEventListener('click', (event) => {
+  const link = event.target.closest('a[href^="#"]');
+  if (!link || link.hash !== window.location.hash || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  helpDialog.close();
+  route(true);
+});
+helpDialog.addEventListener('close', () => {
+  if (helpDialog.open) return;
+  helpLauncher.setAttribute('aria-expanded', 'false');
+  document.documentElement.classList.remove('help-open');
+  helpTarget = undefined;
+  resetHelpQuestion();
+  if (profile && /^#help(?:\/|$)/.test(window.location.hash)) {
+    history.replaceState(null, '', window.location.pathname + window.location.search + pageHash);
+    helpLauncher.focus({ preventScroll: true });
+  }
+});
+window.visualViewport?.addEventListener('resize', sizeHelpDialog);
+window.visualViewport?.addEventListener('scroll', sizeHelpDialog);
+byId('library-retry').addEventListener('click', loadLibrary);
+byId('library-filters').addEventListener('submit', (event) => event.preventDefault());
+byId('library-query').addEventListener('input', renderLibrary);
+byId('library-subject').addEventListener('change', renderLibrary);
+byId('library-favorites').addEventListener('change', renderLibrary);
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden || !profile || signingOut) return;
@@ -1598,7 +1790,7 @@ byId('logout').addEventListener('click', logout);
 byId('mobile-logout').addEventListener('click', logout);
 
 const mobileNav = byId('mobile-nav');
-mobileNav.append(...[...document.querySelectorAll('.sidebar [data-view]')].map((link) => link.cloneNode(true)));
+mobileNav.append(...[...document.querySelector('.sidebar .primary-nav').children].map((item) => item.cloneNode(true)));
 mobileAvatar.addEventListener('click', () => {
   if (!profile || mobileMenu.open || !mobileLayout.matches) return;
   mobileMenu.showModal();
@@ -1635,6 +1827,7 @@ mobileLayout.addEventListener('change', (event) => {
 });
 
 byId('day-picker').addEventListener('change', (event) => selectDay(event.target.value));
+byId('home-week').addEventListener('change', (event) => selectHomeDay(event.target.value));
 for (const button of document.querySelectorAll('[data-schedule-retry]')) {
   button.addEventListener('click', loadSchedule);
 }

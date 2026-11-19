@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#fbf8f2">
   <title>Личный кабинет</title>
   <link rel="stylesheet" href="/styles.css">
@@ -45,15 +45,24 @@
       </div>
       <nav class="primary-nav" aria-label="Разделы кабинета">
         <a href="#home" data-view="home"><span class="nav-icon icon-home" aria-hidden="true"></span>Главная</a>
-        <a href="#schedule" data-view="schedule"><span class="nav-icon icon-calendar" aria-hidden="true"></span>Расписание</a>
-        <a href="#grades" data-view="grades"><span class="nav-icon icon-grades" aria-hidden="true"></span>Успеваемость</a>
-        <a href="#assignments" data-view="assignments"><span class="nav-icon icon-sheet" aria-hidden="true"></span>Задания</a>
-        <a href="#requests" data-view="requests"><span class="nav-icon icon-sheet" aria-hidden="true"></span>Справки и документы</a>
-        <a href="#messages" data-view="messages"><span class="nav-icon icon-message" aria-hidden="true"></span>Сообщения<span class="count-badge nav-count" data-unread hidden></span></a>
-        <a href="#contacts" data-view="contacts"><span class="nav-icon icon-profile" aria-hidden="true"></span>Контакты</a>
-        <a href="#updates" data-view="updates"><span class="nav-icon icon-bell" aria-hidden="true"></span>Уведомления</a>
-        <a href="#campus" data-view="campus"><span class="nav-icon icon-calendar" aria-hidden="true"></span>Карта кампуса</a>
-        <a href="#help" data-view="help"><span class="nav-icon icon-message" aria-hidden="true"></span>Помощник по кабинету</a>
+        <div class="nav-group" role="group" aria-label="Учёба">
+          <p class="nav-heading" aria-hidden="true">Учёба</p>
+          <a href="#schedule" data-view="schedule"><span class="nav-icon icon-calendar" aria-hidden="true"></span>Расписание</a>
+          <a href="#grades" data-view="grades"><span class="nav-icon icon-grades" aria-hidden="true"></span>Успеваемость</a>
+          <a href="#assignments" data-view="assignments"><span class="nav-icon icon-sheet" aria-hidden="true"></span>Задания</a>
+          <a href="#library" data-view="library"><span class="nav-icon icon-book" aria-hidden="true"></span>Библиотека</a>
+        </div>
+        <div class="nav-group" role="group" aria-label="Сервисы">
+          <p class="nav-heading" aria-hidden="true">Сервисы</p>
+          <a href="#requests" data-view="requests"><span class="nav-icon icon-sheet" aria-hidden="true"></span>Справки и документы</a>
+          <a href="#messages" data-view="messages"><span class="nav-icon icon-message" aria-hidden="true"></span>Сообщения<span class="count-badge nav-count" data-unread hidden></span></a>
+          <a href="#updates" data-view="updates"><span class="nav-icon icon-bell" aria-hidden="true"></span>Уведомления</a>
+        </div>
+        <div class="nav-group" role="group" aria-label="Кампус">
+          <p class="nav-heading" aria-hidden="true">Кампус</p>
+          <a href="#campus" data-view="campus"><span class="nav-icon icon-calendar" aria-hidden="true"></span>Карта кампуса</a>
+          <a href="#contacts" data-view="contacts"><span class="nav-icon icon-profile" aria-hidden="true"></span>Контакты</a>
+        </div>
         <a href="#profile" data-view="profile"><span class="nav-icon icon-profile" aria-hidden="true"></span>Профиль</a>
       </nav>
       <div class="sidebar-account">
@@ -75,8 +84,10 @@
       </div>
       <form class="app-search" id="search-form" role="search">
         <label class="visually-hidden" for="search-query">Поиск по кабинету</label>
-        <input id="search-query" type="search" placeholder="Поиск" maxlength="100" autocomplete="off" aria-controls="search-results">
-        <button class="button button-secondary" type="submit">Найти</button>
+        <div class="search-field">
+          <input id="search-query" type="search" placeholder="Поиск" maxlength="100" autocomplete="off" aria-controls="search-results">
+          <button class="search-submit" type="submit" aria-label="Найти"><span class="nav-icon icon-search" aria-hidden="true"></span></button>
+        </div>
         <div class="search-results panel" id="search-results" hidden>
           <p id="search-status" class="muted" role="status"></p>
           <ul id="search-list"></ul>
@@ -99,35 +110,40 @@
 
         <section class="view" id="view-home" aria-label="Обзор учебного дня">
           <div class="welcome">
-            <div><h2 id="welcome-name"></h2><p id="welcome-summary"></p></div>
+            <h2 id="welcome-name"></h2>
           </div>
-          <div class="home-stats" id="home-stats" hidden></div>
           <div class="schedule-status" id="home-status">
             <p role="status" data-status></p>
             <button type="button" class="button button-secondary" data-schedule-retry hidden>Повторить</button>
           </div>
-          <div class="home-grid" id="home-schedule" hidden>
-            <section class="panel home-calendar" data-student-schedule>
-              <div class="panel-heading">
-                <h2>Учебная неделя</h2>
-                <span class="muted" id="home-week-label"></span>
-              </div>
-              <div class="mini-week" id="home-week"></div>
-            </section>
-            <div id="home-cabinet" class="home-module"></div>
-            <section class="panel" data-student-schedule>
+          <div class="home-grid" id="home-schedule" data-student-schedule hidden>
+            <section class="panel home-upcoming">
               <div class="panel-heading">
                 <h2>Ближайшие занятия</h2>
                 <a class="inline-link" href="#schedule">Всё расписание <span aria-hidden="true">→</span></a>
               </div>
               <div id="upcoming-lessons"></div>
             </section>
-            <section class="panel" data-student-schedule>
+            <section class="panel home-changes">
               <div class="panel-heading">
-                <h2>Изменения на неделе</h2>
+                <h2>Предстоящие изменения</h2>
               </div>
               <div id="changed-lessons"></div>
             </section>
+          </div>
+          <div class="home-stats" id="home-stats" hidden></div>
+          <div class="home-grid">
+            <section class="panel home-calendar" data-student-schedule hidden>
+              <div class="panel-heading">
+                <h2>Учебная неделя</h2>
+                <span class="muted" id="home-week-label"></span>
+              </div>
+              <fieldset class="mini-week" id="home-week">
+                <legend class="visually-hidden">День учебной недели</legend>
+              </fieldset>
+              <div class="home-day" id="home-day" aria-live="polite"></div>
+            </section>
+            <div id="home-cabinet" class="home-module" hidden></div>
           </div>
           <div id="home-staff" class="home-grid" hidden></div>
         </section>
@@ -196,28 +212,26 @@
           <div class="cabinet-layout" id="updates-content"></div>
         </section>
 
-        <section class="view" id="view-help" aria-label="Помощник по кабинету" hidden>
-          <div class="cabinet-layout">
-            <section class="panel" aria-labelledby="help-question-heading">
-              <h2 id="help-question-heading">Задать вопрос</h2>
-              <p class="muted">Автоматические ответы из FAQ. Вводите вопрос без персональных данных.</p>
-              <form class="cabinet-form" id="help-form">
-                <div class="form-field">
-                  <label for="help-query">Вопрос о кабинете</label>
-                  <input id="help-query" type="text" maxlength="200" placeholder="Например, как загрузить работу?" autocomplete="off" required>
-                </div>
-                <button class="button button-primary" type="submit">Получить ответ</button>
-              </form>
-              <p class="muted" id="help-status" role="status"></p>
-              <div class="help-answer" id="help-answer" aria-live="polite"></div>
-            </section>
-            <section class="panel" aria-labelledby="faq-heading">
-              <h2 id="faq-heading">Частые вопросы</h2>
-              <p class="muted" id="faq-status" role="status"></p>
-              <button class="button button-secondary" id="faq-retry" type="button" hidden>Повторить</button>
-              <div id="faq-content"></div>
-            </section>
-          </div>
+        <section class="view cabinet-layout" id="view-library" aria-label="Библиотека" hidden>
+          <section class="panel library-catalog">
+            <h2>Учебный каталог</h2>
+            <p class="muted">Демонстрационные записи книг. Каталог содержит описания.</p>
+            <form class="library-filters" id="library-filters" role="search" aria-label="Поиск книг">
+              <div class="form-field">
+                <label for="library-query">Название или автор</label>
+                <input type="search" id="library-query" placeholder="Найти книгу" maxlength="120" autocomplete="off">
+              </div>
+              <div class="form-field">
+                <label for="library-subject">Предмет</label>
+                <select id="library-subject"><option value="">Все предметы</option></select>
+              </div>
+              <label class="library-check"><input type="checkbox" id="library-favorites"> Только избранное</label>
+            </form>
+            <p class="muted" id="library-status" role="status"></p>
+            <p class="local-error" id="library-error" role="alert"></p>
+            <button class="button button-secondary" id="library-retry" type="button" hidden>Повторить</button>
+            <div id="library-results"></div>
+          </section>
         </section>
 
         <section class="view" id="view-campus" aria-label="Карта кампуса" hidden>
@@ -299,16 +313,51 @@
 
       <footer class="app-footer prototype-notice">Конкурсный прототип. Неофициальный сервис</footer>
     </div>
+    <div class="help-dock">
+      <button class="help-launcher" id="help-launcher" type="button" aria-label="Помощник по кабинету" aria-haspopup="dialog" aria-controls="help-dialog" aria-expanded="false" aria-describedby="help-tooltip"><span aria-hidden="true">?</span></button>
+      <span class="help-tooltip" id="help-tooltip" role="tooltip">Есть вопросы? Задавайте!</span>
+    </div>
   </div>
   <dialog class="mobile-menu" id="mobile-menu" aria-labelledby="mobile-menu-name" aria-describedby="mobile-menu-role">
     <div class="mobile-menu-content">
       <div class="mobile-menu-account">
-        <div><h2 id="mobile-menu-name"></h2><p class="muted" id="mobile-menu-role"></p></div>
         <form method="dialog"><button class="button button-secondary" type="submit" autofocus>Закрыть</button></form>
       </div>
       <nav class="primary-nav" id="mobile-nav" aria-label="Разделы кабинета"></nav>
-      <button class="logout-button" id="mobile-logout" type="button">Выйти</button>
-      <p class="local-error" id="mobile-logout-error" role="alert"></p>
+      <div class="mobile-menu-footer">
+        <div class="sidebar-person">
+          <span class="avatar" id="mobile-menu-initials" aria-hidden="true"></span>
+          <div><h2 id="mobile-menu-name"></h2><p class="muted" id="mobile-menu-role"></p></div>
+        </div>
+        <button class="logout-button" id="mobile-logout" type="button">Выйти</button>
+        <p class="local-error" id="mobile-logout-error" role="alert"></p>
+      </div>
+    </div>
+  </dialog>
+  <dialog class="help-dialog" id="help-dialog" aria-labelledby="help-heading">
+    <div class="help-dialog-heading">
+      <h2 id="help-heading" tabindex="-1" autofocus>Помощник по кабинету</h2>
+      <form method="dialog"><button class="button button-secondary" type="submit">Закрыть</button></form>
+    </div>
+    <div class="help-dialog-content">
+      <section aria-label="Задать вопрос">
+        <p class="muted">Автоматические ответы из FAQ. Вводите вопрос без персональных данных.</p>
+        <form class="cabinet-form" id="help-form">
+          <div class="form-field">
+            <label for="help-query">Вопрос о кабинете</label>
+            <input id="help-query" type="text" maxlength="200" placeholder="Например, где посмотреть оценки?" autocomplete="off" required>
+          </div>
+          <button class="button button-primary" type="submit">Получить ответ</button>
+        </form>
+        <p class="muted" id="help-status" role="status"></p>
+        <div class="help-answer" id="help-answer" aria-live="polite"></div>
+      </section>
+      <section aria-labelledby="faq-heading">
+        <h3 id="faq-heading">Частые вопросы</h3>
+        <p class="muted" id="faq-status" role="status"></p>
+        <button class="button button-secondary" id="faq-retry" type="button" hidden>Повторить</button>
+        <div id="faq-content"></div>
+      </section>
     </div>
   </dialog>
   <dialog class="lesson-dialog panel" id="lesson-dialog" aria-labelledby="lesson-dialog-heading">

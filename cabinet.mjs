@@ -294,11 +294,31 @@ function migrateAppeals(db) {
   `);
 }
 
+const libraryBooks = [
+  ['Архив звёздных карт', 'Вера Лучина', 'Астрономия', 'Учебные заметки о наблюдении звёзд.'],
+  ['Наблюдения за ночным небом', 'Павел Сумеркин', 'Астрономия', 'Демонстрационный журнал наблюдений.'],
+  ['Записки о лунных травах', 'Лада Ветрина', 'Травология', 'Заметки по распознаванию учебных образцов.'],
+  ['Теплица под стеклом', 'Анна Родникова', 'Травология', 'Введение в уход за растениями.'],
+  ['Основы зельеварения', 'Илья Туманцев', 'Зельеварение', 'Справочник по работе с учебными рецептами.'],
+  ['Лабораторный журнал зельевара', 'Марина Полевица', 'Зельеварение', 'Как записывать измерения и наблюдения.'],
+  ['Грамматика заклинаний', 'Ольга Перелесова', 'Заклинания', 'Учебные примеры произношения.'],
+  ['Форма и превращение', 'Егор Клинок', 'Трансфигурация', 'Разбор последовательностей преобразования.'],
+  ['Практика защитных чар', 'Виктор Вересин', 'Защита от тёмных искусств', 'Разбор вымышленных учебных ситуаций.'],
+].map(([title, author, subject, description], index) => ({ id: index + 1, title, author, subject, description }));
+
 export function seedCabinet(db, week) {
   const version = db.prepare('PRAGMA user_version').get().user_version;
   if (version < 2) seedCabinetFixtures(db);
   if (version < 3) seedLessonCancellation(db, week);
   if (version < 4) migrateAppeals(db);
+  if (version < 5) db.exec(`
+    CREATE TABLE library_favorites (
+      account_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      book_id INTEGER NOT NULL,
+      PRIMARY KEY (account_id, book_id)
+    ) STRICT;
+    PRAGMA user_version = 5;
+  `);
 }
 
 function isPdf(contents) {
@@ -409,6 +429,7 @@ const searchSections = [
   ['messages', 'Сообщения'],
   ['updates', 'Уведомления'],
   ['contacts', 'Контакты', null, 'преподаватели'],
+  ['library', 'Библиотека'],
   ['campus', 'Карта кампуса', null, 'кампус'],
   ['help', 'Помощник по кабинету', null, 'FAQ частые вопросы'],
   ['profile', 'Профиль'],
@@ -815,7 +836,24 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     createAppealEvent.run(id, 'withdrawn', withdrawnAt);
   }
 
+  const favoriteBooks = prepare('SELECT book_id FROM library_favorites WHERE account_id = ?');
+  const addFavorite = prepare('INSERT OR IGNORE INTO library_favorites (account_id, book_id) VALUES (?, ?)');
+  const removeFavorite = prepare('DELETE FROM library_favorites WHERE account_id = ? AND book_id = ?');
+
+  function library(viewer) {
+    const favorites = new Set(favoriteBooks.all(viewer.id).map(({ book_id }) => book_id));
+    return { books: libraryBooks.map((book) => ({ ...book, favorite: favorites.has(book.id) })) };
+  }
+
+  function setFavorite(viewer, id, { favorite }) {
+    if (!libraryBooks.some((book) => book.id === id)) throw new HttpError(404, 'Книга не найдена.');
+    if (typeof favorite !== 'boolean') throw new HttpError(400, 'Укажите состояние избранного.');
+    (favorite ? addFavorite : removeFavorite).run(viewer.id, id);
+  }
+
   const routes = [
+    { method: 'GET', path: /^\/api\/library$/, action: library },
+    { method: 'POST', path: /^\/api\/library\/([^/]+)\/favorite$/, action: setFavorite },
     { method: 'GET', path: /^\/api\/cabinet$/, action: cabinet },
     { method: 'POST', path: /^\/api\/requests$/, role: 'student', action: submitRequest },
     { method: 'POST', path: /^\/api\/requests\/([^/]+)\/status$/, role: 'dean', action: changeRequest },
