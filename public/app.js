@@ -57,7 +57,9 @@ let selectedDialogue;
 let dialogueLoad;
 let lessonOpen;
 let pendingTarget;
-let drawerDestination;
+let drawerNavigating = false;
+let pointerNavigation = false;
+let helpNavigationClose = false;
 let searchTimer;
 let searchLoad;
 let helpCatalog;
@@ -142,11 +144,11 @@ function route(focusHeading = false) {
   renderCabinet();
   if (active === 'requests' && profile.role === 'student') loadHelpCatalog();
   if (active === 'library') loadLibrary();
-  const fromDrawer = drawerDestination === window.location.hash;
-  drawerDestination = undefined;
+  heading.classList.toggle('pointer-navigation', pointerNavigation);
+  pointerNavigation = false;
   if (focusHeading || pendingTarget) {
     window.scrollTo(0, 0);
-    if (!fromDrawer) heading.focus({ preventScroll: true });
+    heading.focus({ preventScroll: true });
   }
   revealTarget();
   if (requested === 'help') openHelp(targetId);
@@ -179,7 +181,8 @@ function showLogin(message = '', focusHeading = false) {
   renders.clear();
   messageStates.clear();
   renderedMessages.clear();
-  pendingTarget = drawerDestination = undefined;
+  pendingTarget = undefined;
+  drawerNavigating = pointerNavigation = false;
   composingMessage = false;
   clearSearch();
   helpCatalog = helpCatalogLoad = undefined;
@@ -595,6 +598,7 @@ function showCabinetStatus(message = '', retry = false) {
 }
 
 function updateUnread(count) {
+  byId('header-inbox').setAttribute('aria-label', 'Сообщения, непрочитанных: ' + count);
   for (const badge of document.querySelectorAll('[data-unread]')) {
     const hidden = !count && badge.classList.contains('nav-count');
     if (badge.hidden !== hidden) badge.hidden = hidden;
@@ -1120,7 +1124,7 @@ function helpWordScore(query, word) {
 
 function findHelpSuggestions(faq, text) {
   const words = [...new Set(helpWords(text))].filter((word) => !['как', 'где', 'и', 'в', 'на', 'по', 'о', 'об', 'для'].includes(word));
-  if (!words.length) return [];
+  if (!words.length || words.every((word) => word.length < 2)) return [];
   return faq.map((entry) => {
     const score = [entry.title, ...entry.terms].reduce((best, phrase) => {
       const tokens = helpWords(phrase);
@@ -1158,7 +1162,12 @@ function hideHelpSuggestions() {
   renderHelpSuggestions();
 }
 
+function syncHelpSend() {
+  byId('help-send').disabled = Boolean(helpQuestionLoad) || !byId('help-query').value.trim();
+}
+
 function updateHelpSuggestions() {
+  syncHelpSend();
   helpSuggestions = findHelpSuggestions(helpCatalog?.faq ?? [], byId('help-query').value);
   helpSelection = -1;
   renderHelpSuggestions();
@@ -1168,7 +1177,7 @@ function resetHelpQuestion() {
   helpQuestionLoad?.controller.abort();
   helpQuestionLoad = undefined;
   byId('help-form').reset();
-  byId('help-send').disabled = false;
+  syncHelpSend();
   byId('help-status').textContent = '';
   byId('help-answer').replaceChildren();
   hideHelpSuggestions();
@@ -1202,7 +1211,7 @@ async function askHelp(event) {
   } finally {
     if (helpQuestionLoad === load) {
       helpQuestionLoad = undefined;
-      byId('help-send').disabled = false;
+      syncHelpSend();
     }
   }
 }
@@ -1719,8 +1728,7 @@ async function runSearch(query, account, load) {
         if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
         clearSearch();
-        if (window.location.hash === hash) route(true);
-        else window.location.hash = hash;
+        navigateFromLink(hash, event);
       });
       row.append(link);
       byId('search-list').append(row);
@@ -1791,12 +1799,35 @@ byId('help-query').addEventListener('keydown', (event) => {
   renderHelpSuggestions();
 });
 helpLauncher.addEventListener('click', () => openHelp());
+
+function navigateFromLink(hash, event) {
+  pointerNavigation = event.detail > 0;
+  if (helpDialog.open) {
+    helpNavigationClose = true;
+    helpDialog.close();
+    if (window.location.hash.startsWith('#help')) {
+      history.replaceState(null, '', window.location.pathname + window.location.search + pageHash);
+    }
+  }
+  if (window.location.hash === hash || (!window.location.hash && hash === '#home')) route(true);
+  else window.location.hash = hash;
+}
+
+document.addEventListener('click', (event) => {
+  const link = event.target.closest('.sidebar a[data-view], #help-dialog a[href^="#"], #header-inbox');
+  if (!link || event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  navigateFromLink(link.hash, event);
+});
+
 helpDialog.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
   event.preventDefault();
   helpDialog.close();
 });
 helpDialog.addEventListener('close', () => {
+  const viaNavigation = helpNavigationClose;
+  helpNavigationClose = false;
   if (helpDialog.open) return;
   helpLauncher.setAttribute('aria-expanded', 'false');
   helpTarget = undefined;
@@ -1804,7 +1835,7 @@ helpDialog.addEventListener('close', () => {
   if (profile && /^#help(?:\/|$)/.test(window.location.hash)) {
     history.replaceState(null, '', window.location.pathname + window.location.search + pageHash);
   }
-  if (profile) helpLauncher.focus({ preventScroll: true });
+  if (profile && !viaNavigation) helpLauncher.focus({ preventScroll: true });
 });
 window.visualViewport?.addEventListener('resize', sizeHelpDialog);
 window.visualViewport?.addEventListener('scroll', sizeHelpDialog);
@@ -1884,11 +1915,9 @@ mobileNav.addEventListener('click', (event) => {
   const link = event.target.closest('a[data-view]');
   if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
+  drawerNavigating = true;
   mobileMenu.close();
-  if (window.location.hash !== link.hash) {
-    drawerDestination = link.hash;
-    window.location.hash = link.hash;
-  }
+  navigateFromLink(link.hash, event);
 });
 mobileMenu.addEventListener('click', (event) => {
   if (event.target !== mobileMenu) return;
@@ -1900,6 +1929,10 @@ mobileMenu.addEventListener('click', (event) => {
 mobileMenu.addEventListener('close', () => {
   mobileAvatar.setAttribute('aria-expanded', 'false');
   document.documentElement.classList.remove('menu-open');
+  if (drawerNavigating) {
+    drawerNavigating = false;
+    return;
+  }
   if (profile && mobileLayout.matches) mobileAvatar.focus({ preventScroll: true });
   if (profile && !mobileLayout.matches) {
     document.querySelector('.sidebar [aria-current="page"]')?.focus({ preventScroll: true });

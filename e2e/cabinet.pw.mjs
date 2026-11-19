@@ -96,7 +96,7 @@ for (const width of [360, 440]) {
     await expect(helper).toBeVisible();
     if (width === 360) await capture(page, 'helper');
     await expect(helper.getByRole('combobox', { name: 'Вопрос о кабинете' })).toBeVisible();
-    await helper.getByRole('button', { name: 'Закрыть' }).click();
+    await helper.getByRole('button', { name: 'Закрыть помощника' }).click();
     await expect(helper).toBeHidden();
   });
 }
@@ -222,7 +222,13 @@ for (const [label, width, height] of [['desktop', 1440, 980], ['360', 360, 800],
     const input = dialog.getByRole('combobox', { name: 'Вопрос о кабинете' });
     await expect(dialog).toBeVisible();
     await expect(input).toBeInViewport();
-    await expect(dialog.getByRole('button', { name: 'Отправить' })).toBeInViewport();
+    await expect(dialog.getByRole('button', { name: 'Отправить сообщение' })).toBeDisabled();
+    for (const name of ['Закрыть помощника', 'Отправить сообщение']) {
+      const control = await dialog.getByRole('button', { name }).boundingBox();
+      expect(control.width).toBeGreaterThanOrEqual(44);
+      expect(control.height).toBeGreaterThanOrEqual(44);
+    }
+    await expect(dialog.getByRole('button', { name: 'Отправить сообщение' })).toBeInViewport();
     const { backdrop, box } = await dialog.evaluate((element) => {
       const window = element.ownerDocument.defaultView;
       const bounds = element.getBoundingClientRect();
@@ -240,15 +246,15 @@ for (const [label, width, height] of [['desktop', 1440, 980], ['360', 360, 800],
     expect(box.top).toBeGreaterThan(height / 3);
     expect((await page.locator('.workspace').boundingBox()).width).toBeCloseTo(mainWidth, 0);
     await page.keyboard.press('Tab');
-    await expect(dialog.getByRole('button', { name: 'Закрыть' })).toBeFocused();
-    await expect(dialog.getByRole('button', { name: 'Закрыть' })).toHaveCSS('outline-style', 'solid');
+    await expect(dialog.getByRole('button', { name: 'Закрыть помощника' })).toBeFocused();
+    await expect(dialog.getByRole('button', { name: 'Закрыть помощника' })).toHaveCSS('outline-style', 'solid');
     await page.screenshot({ path: `test-results/glass/helper-${label}.png`, animations: 'disabled' });
     await page.keyboard.press('Shift+Tab');
     await expect(launcher).toBeFocused();
     await page.keyboard.press('Tab');
-    await expect(dialog.getByRole('button', { name: 'Закрыть' })).toBeFocused();
+    await expect(dialog.getByRole('button', { name: 'Закрыть помощника' })).toBeFocused();
     const options = dialog.getByRole('option');
-    for (const value of ['с', 'сп', 'справ', 'статус справ']) {
+    for (const value of ['сп', 'справ', 'статус справ']) {
       await input.fill(value);
       await expect(options.first()).toBeVisible();
       expect(await options.count()).toBeLessThanOrEqual(4);
@@ -260,7 +266,7 @@ for (const [label, width, height] of [['desktop', 1440, 980], ['360', 360, 800],
         await expect(options.first()).toContainText(/статус/i);
       }
     }
-    for (const value of ['', 'зюзюкалка']) {
+    for (const value of ['', 'с', 'зюзюкалка']) {
       await input.fill(value);
       await expect(options).toHaveCount(0);
     }
@@ -289,13 +295,17 @@ for (const [label, width, height] of [['desktop', 1440, 980], ['360', 360, 800],
     await page.mouse.move(width > 1100 ? 350 : 30, 180);
     await page.mouse.wheel(0, 350);
     await expect.poll(() => page.evaluate(() => globalThis.scrollY)).toBeGreaterThan(initialScroll);
-    for (const name of ['Расписание', 'Справки и документы', 'Библиотека', 'Главная']) {
+    for (const name of ['Главная', 'Успеваемость', 'Расписание', 'Справки и документы', 'Библиотека', 'Главная']) {
       const navigation = width > 1100 ? page.locator('.sidebar nav') : page.locator('#mobile-menu');
       if (width < 1100) await page.locator('#mobile-avatar').click();
       await navigation.getByRole('link', { name, exact: true }).click();
       await expect(page.locator('#page-heading')).toHaveText(name);
-      await expect(dialog).toBeVisible();
+      await expect(dialog).toBeHidden();
+      await expect(page.locator('#page-heading')).toBeFocused();
+      await expect(page.locator('#page-heading')).toHaveCSS('outline-style', 'none');
+      await launcher.click();
       await expect(input).toHaveValue('Черновик вопроса');
+      await expect(dialog.locator('.help-question')).toHaveText(chosen);
       await fits(page);
     }
     await page.locator('#page-heading').focus();
@@ -355,4 +365,35 @@ test('appeal withdrawal uses one click and keeps the grade, including on failure
   expect(after.appeals.find(({ id }) => id === appeal.id).history.at(-1).status).toBe('withdrawn');
   expect(after.assignments.find(({ id }) => id === graded.id).submission.points).toBe(graded.submission.points);
   expect(after.grades).toEqual(before.grades);
+});
+
+test('assistant icon controls respond to touch and navigation actions preserve history', async ({ browser, cabinet }) => {
+  const context = await browser.newContext({ viewport: { width: 360, height: 800 }, hasTouch: true });
+  try {
+    const page = await context.newPage();
+    await login(page, cabinet);
+    const launcher = page.locator('#help-launcher');
+    const dialog = page.locator('#help-dialog');
+    const input = page.locator('#help-query');
+    await expect(page.locator('#header-inbox')).toHaveAccessibleName(/Сообщения, непрочитанных: \d+/);
+    await launcher.tap();
+    await input.fill('Где расписание?');
+    await dialog.getByRole('button', { name: 'Отправить сообщение' }).tap();
+    await expect(dialog.locator('.help-question')).toHaveText('Где расписание?');
+    await dialog.getByRole('link', { name: /Расписание/ }).tap();
+    await expect(dialog).toBeHidden();
+    await expect(page.locator('#page-heading')).toHaveText('Расписание');
+    await launcher.tap();
+    await expect(dialog.locator('.help-question')).toHaveText('Где расписание?');
+    await page.locator('#search-query').fill('Библиотека');
+    await page.locator('#search-results').getByRole('link', { name: /Библиотека/ }).tap();
+    await expect(dialog).toBeHidden();
+    await expect(page.locator('#page-heading')).toHaveText('Библиотека');
+    await launcher.tap();
+    await dialog.getByRole('button', { name: 'Закрыть помощника' }).tap();
+    await expect(dialog).toBeHidden();
+    await expect(launcher).toBeFocused();
+  } finally {
+    await context.close();
+  }
 });

@@ -1323,3 +1323,39 @@ details[open] > .record-summary::before { transform: rotate(45deg); }
 @media (max-width: 680px) {
   .help-dialog[open] { width: auto; max-height: min(49dvh, calc(var(--help-height, 100dvh) - 76px)); }
 }
+
+.page-header h1:focus-visible { outline-width: 2px; outline-offset: 2px; width: fit-content; }
+.page-header h1.pointer-navigation:focus { outline: none; }
+#view-home .panel { border-color: transparent; }
+.header-inbox { min-width: 44px; min-height: 44px; justify-content: center; }
+.icon-control { position: relative; display: inline-flex; flex: none; }
+.help-dialog .icon-button { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border-radius: 12px; }
+.icon-button svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+.icon-tooltip {
+  display: none;
+  position: absolute;
+  z-index: 1;
+  inset-inline-end: 0;
+  width: max-content;
+  max-width: 180px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--glass-shadow);
+  font-size: .8rem;
+  pointer-events: none;
+}
+.help-dialog-heading .icon-tooltip { inset-block-start: calc(100% + 4px); }
+.help-input-row .icon-tooltip { inset-block-end: calc(100% + 4px); }
+.icon-control:focus-within .icon-tooltip { display: block; }
+@media (hover: hover) {
+  .icon-control:hover .icon-tooltip { display: block; }
+}

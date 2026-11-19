@@ -99,7 +99,7 @@
       <main class="main-content">
         <header class="page-header">
           <h1 id="page-heading" tabindex="-1">Главная</h1>
-          <a class="button button-secondary header-inbox" id="header-inbox" href="#messages"><span class="nav-icon icon-message" aria-hidden="true"></span>Сообщения<span class="count-badge" data-unread>0</span></a>
+          <a class="button button-secondary header-inbox" id="header-inbox" href="#messages" aria-label="Сообщения, непрочитанных: 0"><span class="nav-icon icon-message" aria-hidden="true"></span><span class="count-badge" aria-hidden="true" data-unread>0</span></a>
         </header>
         <p class="app-error" id="app-error" role="alert"></p>
         <div class="schedule-status" id="cabinet-status" hidden>
@@ -320,7 +320,7 @@
     <dialog class="help-dialog" id="help-dialog" aria-labelledby="help-heading">
       <div class="help-dialog-heading">
         <h2 id="help-heading" tabindex="-1" autofocus>Помощник по кабинету</h2>
-        <form method="dialog"><button class="button button-secondary" type="submit">Закрыть</button></form>
+        <form method="dialog"><span class="icon-control"><button class="button button-secondary icon-button" type="submit" aria-label="Закрыть помощника"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button><span class="icon-tooltip" aria-hidden="true">Закрыть помощника</span></span></form>
       </div>
       <div class="help-dialog-content" id="help-history" role="log" aria-label="История вопросов и ответов">
         <p class="muted">Спросите о кабинете. Помощник отвечает по базе FAQ.</p>
@@ -334,7 +334,7 @@
         <div class="help-input-row">
           <label class="visually-hidden" for="help-query">Вопрос о кабинете</label>
           <input id="help-query" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="help-suggestions" maxlength="200" placeholder="Ваш вопрос" autocomplete="off" required>
-          <button class="button button-primary" id="help-send" type="submit">Отправить</button>
+          <span class="icon-control"><button class="button button-primary icon-button" id="help-send" type="submit" aria-label="Отправить сообщение" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button><span class="icon-tooltip" aria-hidden="true">Отправить сообщение</span></span>
         </div>
       </form>
     </dialog>
