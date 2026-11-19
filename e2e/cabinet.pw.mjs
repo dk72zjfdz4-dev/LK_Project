@@ -95,7 +95,7 @@ for (const width of [360, 440]) {
     const helper = page.locator('#help-dialog');
     await expect(helper).toBeVisible();
     if (width === 360) await capture(page, 'helper');
-    await expect(helper.getByRole('textbox', { name: 'Вопрос о кабинете' })).toBeVisible();
+    await expect(helper.getByRole('combobox', { name: 'Вопрос о кабинете' })).toBeVisible();
     await helper.getByRole('button', { name: 'Закрыть' }).click();
     await expect(helper).toBeHidden();
   });
@@ -160,7 +160,7 @@ test('composer handles Enter and Shift+Enter; helper routes known and unknown qu
   await expect(composer).toHaveValue('');
 
   await page.locator('#help-launcher').click();
-  const question = page.getByRole('textbox', { name: 'Вопрос о кабинете' });
+  const question = page.getByRole('combobox', { name: 'Вопрос о кабинете' });
   const answer = page.locator('#help-answer');
   await question.fill('Как получить справку об обучении?');
   await question.press('Enter');
@@ -214,14 +214,15 @@ for (const [label, width, height] of [['desktop', 1440, 980], ['360', 360, 800],
     await fits(page);
     await page.screenshot({ path: `test-results/glass/home-${label}.png`, animations: 'disabled' });
 
+    const mainWidth = (await page.locator('.workspace').boundingBox()).width;
     const launcher = page.locator('#help-launcher');
     await launcher.focus();
     await page.keyboard.press('Enter');
     const dialog = page.locator('#help-dialog');
-    const input = dialog.getByRole('textbox', { name: 'Вопрос о кабинете' });
+    const input = dialog.getByRole('combobox', { name: 'Вопрос о кабинете' });
     await expect(dialog).toBeVisible();
     await expect(input).toBeInViewport();
-    await expect(dialog.getByRole('button', { name: 'Получить ответ' })).toBeInViewport();
+    await expect(dialog.getByRole('button', { name: 'Отправить' })).toBeInViewport();
     const { backdrop, box } = await dialog.evaluate((element) => {
       const window = element.ownerDocument.defaultView;
       const bounds = element.getBoundingClientRect();
@@ -235,10 +236,9 @@ for (const [label, width, height] of [['desktop', 1440, 980], ['360', 360, 800],
     expect(box.top).toBeGreaterThanOrEqual(0);
     expect(box.right).toBeLessThanOrEqual(width);
     expect(box.bottom).toBeLessThanOrEqual(height);
-    if (label === 'desktop') {
-      const workspace = await page.locator('.workspace').boundingBox();
-      expect(workspace.x + workspace.width).toBeLessThanOrEqual(box.left);
-    }
+    expect(box.bottom - box.top).toBeLessThanOrEqual(480);
+    expect(box.top).toBeGreaterThan(height / 3);
+    expect((await page.locator('.workspace').boundingBox()).width).toBeCloseTo(mainWidth, 0);
     await page.keyboard.press('Tab');
     await expect(dialog.getByRole('button', { name: 'Закрыть' })).toBeFocused();
     await expect(dialog.getByRole('button', { name: 'Закрыть' })).toHaveCSS('outline-style', 'solid');
@@ -247,6 +247,42 @@ for (const [label, width, height] of [['desktop', 1440, 980], ['360', 360, 800],
     await expect(launcher).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(dialog.getByRole('button', { name: 'Закрыть' })).toBeFocused();
+    const options = dialog.getByRole('option');
+    for (const value of ['с', 'сп', 'справ', 'статус справ']) {
+      await input.fill(value);
+      await expect(options.first()).toBeVisible();
+      expect(await options.count()).toBeLessThanOrEqual(4);
+      if (value === 'сп' || value === 'справ') {
+        for (const item of await options.allTextContents()) expect(item).toMatch(/справк|статус заявки/i);
+      }
+      if (value === 'статус справ') {
+        await expect(options).toHaveCount(1);
+        await expect(options.first()).toContainText(/статус/i);
+      }
+    }
+    for (const value of ['', 'зюзюкалка']) {
+      await input.fill(value);
+      await expect(options).toHaveCount(0);
+    }
+    await input.fill('расп');
+    await expect(options.first()).toContainText(/расписан/i);
+    for (const item of await options.allTextContents()) expect(item).toMatch(/расписан/i);
+    await input.press('Escape');
+    await expect(options).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+    await input.fill('спарвка');
+    await expect(options.first()).toContainText(/справк/i);
+    let questions = 0;
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname === '/api/help' && new URL(request.url()).searchParams.has('q')) questions++;
+    });
+    await input.press('ArrowDown');
+    await expect(input).toHaveAttribute('aria-activedescendant', 'help-option-0');
+    const chosen = await options.first().textContent();
+    await input.press('Enter');
+    await expect(dialog.locator('.help-question')).toHaveText(chosen);
+    expect(questions).toBe(1);
+    await page.screenshot({ path: `test-results/glass/helper-${label}.png`, animations: 'disabled' });
     await input.fill('Черновик вопроса');
     expect(await dialog.evaluate((node) => node.matches(':modal'))).toBe(false);
     const initialScroll = await page.evaluate(() => globalThis.scrollY);
@@ -271,3 +307,52 @@ for (const [label, width, height] of [['desktop', 1440, 980], ['360', 360, 800],
     await expect(launcher).toBeFocused();
   });
 }
+
+test('appeal withdrawal uses one click and keeps the grade, including on failure', async ({ page, cabinet }) => {
+  await login(page, cabinet);
+  const snapshot = async () => (await page.request.get(cabinet.origin + '/api/cabinet')).json();
+  const before = await snapshot();
+  const graded = before.assignments.find(({ submission }) => submission?.status === 'reviewed');
+  const created = await page.request.post(cabinet.origin + '/api/submissions/' + graded.submission.id + '/appeal', {
+    headers: { Origin: cabinet.origin }, data: { reason: 'Проверка отзыва' },
+  });
+  expect(created.ok()).toBe(true);
+  const appeal = (await snapshot()).appeals.find(({ submissionId }) => submissionId === graded.submission.id);
+  await page.reload();
+  await page.locator('.sidebar nav').getByRole('link', { name: 'Задания' }).click();
+  const card = page.locator('#appeal-' + appeal.id);
+  await card.locator('summary').click();
+  const withdraw = card.getByRole('button', { name: 'Отозвать', exact: true });
+  let dialogs = 0;
+  page.on('dialog', async (dialog) => { dialogs++; await dialog.dismiss(); });
+  const url = '**/api/appeals/' + appeal.id + '/withdraw';
+  const reject = (route) => route.fulfill({ status: 503, json: { error: 'Не удалось отозвать.' } });
+  await page.route(url, reject);
+  await withdraw.click();
+  await expect(card.getByRole('alert')).toHaveText('Не удалось отозвать.');
+  await expect(card.locator('summary')).not.toContainText('Отозвано');
+  expect((await snapshot()).appeals.find(({ id }) => id === appeal.id).status).toBe('pending');
+  await page.unroute(url, reject);
+
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let requests = 0;
+  await page.route(url, async (route) => {
+    requests++;
+    await gate;
+    await route.continue();
+  });
+  try {
+    await withdraw.click();
+    await expect(withdraw).toBeDisabled();
+  } finally {
+    release();
+  }
+  await expect(card.locator('summary')).toContainText('Отозвано');
+  expect(dialogs).toBe(0);
+  expect(requests).toBe(1);
+  const after = await snapshot();
+  expect(after.appeals.find(({ id }) => id === appeal.id).history.at(-1).status).toBe('withdrawn');
+  expect(after.assignments.find(({ id }) => id === graded.id).submission.points).toBe(graded.submission.points);
+  expect(after.grades).toEqual(before.grades);
+});

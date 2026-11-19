@@ -322,26 +322,21 @@
         <h2 id="help-heading" tabindex="-1" autofocus>Помощник по кабинету</h2>
         <form method="dialog"><button class="button button-secondary" type="submit">Закрыть</button></form>
       </div>
-      <div class="help-dialog-content">
-        <section aria-label="Задать вопрос">
-          <p class="muted">Автоматические ответы из FAQ. Вводите вопрос без персональных данных.</p>
-          <form class="cabinet-form" id="help-form">
-            <div class="form-field">
-              <label for="help-query">Вопрос о кабинете</label>
-              <input id="help-query" type="text" maxlength="200" placeholder="Например, где посмотреть оценки?" autocomplete="off" required>
-            </div>
-            <button class="button button-primary" type="submit">Получить ответ</button>
-          </form>
-          <p class="muted" id="help-status" role="status"></p>
-          <div class="help-answer" id="help-answer" aria-live="polite"></div>
-        </section>
-        <section aria-labelledby="faq-heading">
-          <h3 id="faq-heading">Частые вопросы</h3>
-          <p class="muted" id="faq-status" role="status"></p>
-          <button class="button button-secondary" id="faq-retry" type="button" hidden>Повторить</button>
-          <div id="faq-content"></div>
-        </section>
+      <div class="help-dialog-content" id="help-history" role="log" aria-label="История вопросов и ответов">
+        <p class="muted">Спросите о кабинете. Помощник отвечает по базе FAQ.</p>
+        <div id="help-answer"></div>
       </div>
+      <form class="cabinet-form help-composer" id="help-form">
+        <p class="muted" id="faq-status" role="status"></p>
+        <button class="button button-secondary" id="faq-retry" type="button" hidden>Повторить загрузку</button>
+        <p class="muted" id="help-status" role="status"></p>
+        <ul class="help-suggestions" id="help-suggestions" role="listbox" aria-label="Подсказки FAQ" hidden></ul>
+        <div class="help-input-row">
+          <label class="visually-hidden" for="help-query">Вопрос о кабинете</label>
+          <input id="help-query" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="help-suggestions" maxlength="200" placeholder="Ваш вопрос" autocomplete="off" required>
+          <button class="button button-primary" id="help-send" type="submit">Отправить</button>
+        </div>
+      </form>
     </dialog>
   </div>
   <dialog class="mobile-menu" id="mobile-menu" aria-labelledby="mobile-menu-name" aria-describedby="mobile-menu-role">

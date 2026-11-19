@@ -64,6 +64,8 @@ let helpCatalog;
 let helpCatalogLoad;
 let helpQuestionLoad;
 let helpTarget;
+let helpSuggestions = [];
+let helpSelection = -1;
 let pageHash = '';
 let library;
 let libraryLoad;
@@ -222,7 +224,7 @@ function showLogin(message = '', focusHeading = false) {
     'week-grid', 'upcoming-lessons', 'changed-lessons', 'home-day', 'home-week-label', 'home-stats',
     'home-cabinet', 'home-staff', 'grades-content', 'assignments-content', 'requests-content',
     'dialogues-content', 'updates-content', 'contacts-content', 'dialogue-contact', 'lesson-dialog-content', 'action-status',
-    'documents-content', 'faq-content', 'document-catalog-status', 'faq-status',
+    'documents-content', 'document-catalog-status', 'faq-status',
     'library-results', 'library-status', 'library-error',
   ]) byId(id).replaceChildren();
   for (const id of [
@@ -888,7 +890,7 @@ function renderDialogueContact(contact) {
   renders.set('dialogue-contact', signature);
 }
 
-function formFor(id, buttonText, fields, submit, { confirmation, onSaved } = {}) {
+function formFor(id, buttonText, fields, submit, { quiet = false, onSaved } = {}) {
   const form = element('form', 'cabinet-form');
   form.id = id;
   for (const field of fields) {
@@ -925,13 +927,13 @@ function formFor(id, buttonText, fields, submit, { confirmation, onSaved } = {})
   form.addEventListener('input', () => { form.dataset.dirty = ''; });
   form.addEventListener('submit', (event) => {
     event.preventDefault();
-    if (button.disabled || (confirmation && !window.confirm(confirmation))) return;
-    performForm(form, error, submit, { onSaved });
+    if (button.disabled) return;
+    performForm(form, error, submit, { onSaved, quiet });
   });
   return form;
 }
 
-async function performForm(form, output, submit, { onSaved, isCurrent = () => true } = {}) {
+async function performForm(form, output, submit, { onSaved, quiet = false, isCurrent = () => true } = {}) {
   const account = profile;
   const view = activeView;
   const button = form.querySelector('button[type="submit"]');
@@ -949,7 +951,7 @@ async function performForm(form, output, submit, { onSaved, isCurrent = () => tr
       delete form.dataset.dirty;
       onSaved?.();
     }
-    byId('action-status').textContent = 'Изменения сохранены.';
+    if (!quiet) byId('action-status').textContent = 'Изменения сохранены.';
     await loadCabinet({
       fresh: true,
       refreshView: view,
@@ -1031,14 +1033,20 @@ function answerContent(answer, label) {
   return [text, anchor(hash, 'button button-secondary help-link', label ?? 'Перейти в раздел «' + views[answer.view] + '»')];
 }
 
+function appendHelpTurn(question, answer, found = true) {
+  const turn = element('section', 'help-turn');
+  turn.append(element('p', 'help-question', question), element('h3', '', answer.title),
+    ...answerContent(answer, !found && profile.role === 'student' ? 'Написать в деканат' : undefined));
+  byId('help-answer').append(turn);
+  const history = byId('help-history');
+  history.scrollTop = history.scrollHeight;
+}
+
 function revealHelpTarget() {
-  if (!helpTarget || !helpDialog.open) return;
-  const target = byId(helpTarget);
-  if (!target || !byId('faq-content').contains(target)) return;
+  if (!helpTarget || !helpDialog.open || !helpCatalog) return;
+  const entry = helpCatalog.faq.find(({ id }) => 'faq-' + id === helpTarget);
   helpTarget = undefined;
-  target.open = true;
-  target.querySelector('summary').focus({ preventScroll: true });
-  target.scrollIntoView({ block: 'nearest' });
+  if (entry) appendHelpTurn(entry.title, entry);
 }
 
 function sizeHelpDialog() {
@@ -1077,10 +1085,9 @@ async function loadHelpCatalog() {
     if (account.role === 'student') {
       byId('documents-content').replaceChildren(listFor(payload.documents, renderDocument, 'Каталог пока пуст.'));
     }
-    const faq = listFor(payload.faq, (entry) => helpDetails('faq-' + entry.id, entry.title, ...answerContent(entry)), 'Ответов пока нет.');
-    byId('faq-content').replaceChildren(faq);
     for (const area of areas) byId(area + '-status').textContent = '';
     helpCatalog = payload;
+    updateHelpSuggestions();
     revealTarget();
     revealHelpTarget();
   } catch (error) {
@@ -1094,40 +1101,109 @@ async function loadHelpCatalog() {
   }
 }
 
-function clearHelpAnswer() {
-  helpQuestionLoad?.controller.abort();
-  helpQuestionLoad = undefined;
-  byId('help-status').textContent = '';
-  byId('help-answer').replaceChildren();
+function helpWords(text) {
+  return text.normalize('NFC').toLowerCase().replaceAll('ё', 'е').match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+
+function helpWordScore(query, word) {
+  if (word === query) return 4;
+  if (word.startsWith(query)) return 2;
+  if (query.length < 5 || Math.abs(query.length - word.length) > 1) return 0;
+  let index = 0;
+  while (index < query.length && query[index] === word[index]) index++;
+  if (query.length < word.length) return query.slice(index) === word.slice(index + 1) ? 1 : 0;
+  if (query.length > word.length) return query.slice(index + 1) === word.slice(index) ? 1 : 0;
+  if (query.slice(index + 1) === word.slice(index + 1)) return 1;
+  return query[index] === word[index + 1] && query[index + 1] === word[index]
+    && query.slice(index + 2) === word.slice(index + 2) ? 1 : 0;
+}
+
+function findHelpSuggestions(faq, text) {
+  const words = [...new Set(helpWords(text))].filter((word) => !['как', 'где', 'и', 'в', 'на', 'по', 'о', 'об', 'для'].includes(word));
+  if (!words.length) return [];
+  return faq.map((entry) => {
+    const score = [entry.title, ...entry.terms].reduce((best, phrase) => {
+      const tokens = helpWords(phrase);
+      const scores = words.map((word) => tokens.reduce((max, token) => Math.max(max, helpWordScore(word, token)), 0));
+      return scores.every(Boolean) ? Math.max(best, scores.reduce((sum, value) => sum + value, 0)) : best;
+    }, 0);
+    return { entry, score };
+  }).filter(({ score }) => score > 0).sort((a, b) => b.score - a.score).slice(0, 4).map(({ entry }) => entry);
+}
+
+function renderHelpSuggestions() {
+  const input = byId('help-query');
+  const list = byId('help-suggestions');
+  list.hidden = !helpSuggestions.length;
+  input.setAttribute('aria-expanded', String(!list.hidden));
+  input.removeAttribute('aria-activedescendant');
+  list.replaceChildren(...helpSuggestions.map((entry, index) => {
+    const option = element('li', 'help-suggestion', entry.title);
+    option.id = 'help-option-' + index;
+    option.setAttribute('role', 'option');
+    option.setAttribute('aria-selected', String(index === helpSelection));
+    if (index === helpSelection) input.setAttribute('aria-activedescendant', option.id);
+    option.addEventListener('mousedown', (event) => event.preventDefault());
+    option.addEventListener('click', () => {
+      helpSelection = index;
+      byId('help-form').requestSubmit();
+    });
+    return option;
+  }));
+}
+
+function hideHelpSuggestions() {
+  helpSuggestions = [];
+  helpSelection = -1;
+  renderHelpSuggestions();
+}
+
+function updateHelpSuggestions() {
+  helpSuggestions = findHelpSuggestions(helpCatalog?.faq ?? [], byId('help-query').value);
+  helpSelection = -1;
+  renderHelpSuggestions();
 }
 
 function resetHelpQuestion() {
+  helpQuestionLoad?.controller.abort();
+  helpQuestionLoad = undefined;
   byId('help-form').reset();
-  clearHelpAnswer();
+  byId('help-send').disabled = false;
+  byId('help-status').textContent = '';
+  byId('help-answer').replaceChildren();
+  hideHelpSuggestions();
 }
 
 async function askHelp(event) {
   event.preventDefault();
   const account = profile;
-  const query = byId('help-query').value.trim();
-  clearHelpAnswer();
-  if (!account || !query) return;
+  const input = byId('help-query');
+  const draft = input.value;
+  const selected = helpSuggestions[helpSelection];
+  const query = selected?.title ?? draft.trim();
+  if (!account || !query || helpQuestionLoad) return;
   const load = { controller: new AbortController() };
   helpQuestionLoad = load;
+  hideHelpSuggestions();
+  byId('help-send').disabled = true;
   byId('help-status').textContent = 'Ищем ответ…';
-  const current = () => profile === account && helpQuestionLoad === load && helpDialog.open;
+  const current = () => profile === account && helpQuestionLoad === load;
   try {
     const { answer, found } = await request('/api/help?q=' + encodeURIComponent(query), { signal: load.controller.signal });
     if (!current()) return;
+    if (input.value === draft) {
+      input.value = '';
+      hideHelpSuggestions();
+    }
     byId('help-status').textContent = '';
-    byId('help-answer').replaceChildren(
-      element('h3', '', answer.title),
-      ...answerContent(answer, !found && account.role === 'student' ? 'Написать в деканат' : undefined),
-    );
+    appendHelpTurn(query, selected ?? answer, selected ? true : found);
   } catch (error) {
     if (current() && !endSession(error)) byId('help-status').textContent = error.message;
   } finally {
-    if (helpQuestionLoad === load) helpQuestionLoad = undefined;
+    if (helpQuestionLoad === load) {
+      helpQuestionLoad = undefined;
+      byId('help-send').disabled = false;
+    }
   }
 }
 
@@ -1346,9 +1422,9 @@ function renderAppeal(item, assignment, student) {
     }, ''));
   }
   if (student && item.status === 'pending') {
-    detail.append(formFor('appeal-withdraw-' + item.id, 'Отозвать обращение', [],
+    detail.append(formFor('appeal-withdraw-' + item.id, 'Отозвать', [],
       () => post(resource('/api/appeals', item.id, '/withdraw'), {}),
-      { confirmation: 'Отозвать обращение по оценке? Текущие баллы сохранятся.' }));
+      { quiet: true }));
   }
   if (!student && item.status === 'pending') {
     detail.append(formFor('appeal-decision-' + item.id, 'Сохранить решение', [
@@ -1699,7 +1775,21 @@ byId('search-form').addEventListener('focusout', (event) => {
 byId('document-catalog-retry').addEventListener('click', loadHelpCatalog);
 byId('faq-retry').addEventListener('click', loadHelpCatalog);
 byId('help-form').addEventListener('submit', askHelp);
-byId('help-query').addEventListener('input', clearHelpAnswer);
+byId('help-query').addEventListener('input', updateHelpSuggestions);
+byId('help-query').addEventListener('keydown', (event) => {
+  if (event.isComposing || event.keyCode === 229) return;
+  if (event.key === 'Escape' && helpSuggestions.length) {
+    event.preventDefault();
+    hideHelpSuggestions();
+    return;
+  }
+  if (!helpSuggestions.length || !['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+  event.preventDefault();
+  const last = helpSuggestions.length - 1;
+  helpSelection = event.key === 'ArrowDown' ? (helpSelection >= last ? 0 : helpSelection + 1)
+    : (helpSelection <= 0 ? last : helpSelection - 1);
+  renderHelpSuggestions();
+});
 helpLauncher.addEventListener('click', () => openHelp());
 helpDialog.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
@@ -1710,6 +1800,7 @@ helpDialog.addEventListener('close', () => {
   if (helpDialog.open) return;
   helpLauncher.setAttribute('aria-expanded', 'false');
   helpTarget = undefined;
+  hideHelpSuggestions();
   if (profile && /^#help(?:\/|$)/.test(window.location.hash)) {
     history.replaceState(null, '', window.location.pathname + window.location.search + pageHash);
   }

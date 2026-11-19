@@ -1295,27 +1295,31 @@ details[open] > .record-summary::before { transform: rotate(45deg); }
 .app-shell:has(.help-dialog[open]) .help-dock { opacity: 0; pointer-events: none; }
 .app-shell:has(.help-dialog[open]) .help-dock:focus-within { opacity: 1; }
 
-@media (min-width: 1100px) {
-  .app-shell:has(.help-dialog[open]) {
-    grid-template-columns: 214px minmax(0, 1fr) minmax(300px, 26vw);
-  }
-
-  .help-dialog[open] {
-    position: sticky;
-    inset: 12px auto auto;
-    grid-column: 3;
-    grid-row: 1 / -1;
-    align-self: start;
-    width: auto;
-    min-width: 0;
-    margin: 12px 12px 12px 0;
-  }
+/* The floating assistant occupies only its own hit area. */
+.help-dialog[open] {
+  width: min(360px, calc(100vw - 28px));
+  height: 460px;
+  max-height: min(56dvh, calc(var(--help-height, 100dvh) - 76px));
+  background: var(--glass-overlap);
 }
-
-@media (max-width: 1099px) {
-  .help-dialog {
-    max-height: min(49dvh, calc(var(--help-height, 100dvh) - 90px));
-    background: var(--glass-overlap);
-  }
-  .app-shell:has(.help-dialog[open]) .workspace { padding-bottom: 51dvh; }
+.help-dialog-content { flex: 1; }
+.help-composer { flex: none; margin: 0; padding: 9px 12px; background: var(--glass-dense); }
+.help-composer p:empty { display: none; }
+.help-input-row { display: flex; gap: 6px; }
+.help-input-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+}
+.help-suggestions { list-style: none; padding: 0; margin: 0; max-height: min(140px, 20dvh); overflow: auto; }
+.help-suggestion { padding: 5px 8px; cursor: pointer; }
+.help-suggestion:hover, .help-suggestion[aria-selected="true"] { background: var(--lavender); }
+.help-question { margin: 8px 0 4px; padding: 5px 8px; border-radius: 8px; background: var(--glass-dense); }
+.help-turn + .help-turn { margin-top: 12px; }
+@media (max-width: 680px) {
+  .help-dialog[open] { width: auto; max-height: min(49dvh, calc(var(--help-height, 100dvh) - 76px)); }
 }
