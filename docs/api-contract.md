@@ -1,4 +1,4 @@
-# Контракт первого этапа
+# Действующий контракт API
 
 Один origin для интерфейса и API. JSON camelCase. Ответы API с `Cache-Control: no-store`. Ошибка имеет форму `{"error":"сообщение"}`. Изменяющие запросы из браузера отправляются с того же origin. Сессия в HttpOnly cookie.
 
@@ -10,11 +10,11 @@
 | GET /api/lessons/:id | 200 `{lesson}` только для владельца. Чужое или отсутствующее занятие — 404 |
 | POST /api/logout | 204 и отзыв сессии |
 
-Профиль: `fullName, faculty, program, year, group`. Занятие: `id, date, start, end, title, room, teacher, change, cancelled`. Дата `YYYY-MM-DD`, время `HH:mm`, изменение — строка или null, признак отмены — boolean. `today` и `weekStart` — даты. Личные GET без сессии — 401. `/api/schedule` не принимает аргумент владельца.
+Профиль содержит `fullName, firstName, lastName, faculty, program, year, group, role`. Занятие: `id, date, start, end, title, room, teacher, change, cancelled`. Дата `YYYY-MM-DD`, время `HH:mm`, изменение — строка или null, признак отмены — boolean. `today` и `weekStart` — даты. Личные GET без сессии — 401. `/api/schedule` не принимает аргумент владельца.
 
 Владельца каждой записи определяет серверная сессия.
 
-## Расширение
+## Данные кабинета
 
 Профиль дополнительно содержит `role` из `student,teacher,dean`. Общий GET `/api/cabinet` возвращает доступные роли коллекции `grades, requests, dialogues, assignments, appeals, notifications` и `unreadCount`. Коллекции всегда массивы, включая пустые.
 
@@ -40,7 +40,7 @@
 - Пересмотр `{id,submissionId,title,reason,status,comment,oldPoints,newPoints,createdAt,decidedAt}`.
 - Уведомление `{id,title,text,createdAt}`.
 
-Все POST отвечают JSON `{ok:true}` и требуют тот же origin. Чужой идентификатор возвращает 404, запрет роли 403. Все даты событий ISO, дедлайн принимает дату или ISO.
+POST в таблице данных кабинета и POST для избранного отвечают JSON `{ok:true}`. Все POST требуют тот же origin. Для входа и выхода действуют ответы из первой таблицы. Чужой идентификатор возвращает 404, запрет роли 403. Все даты событий ISO, дедлайн принимает дату или ISO.
 
 ## Удобство кабинета
 
@@ -54,8 +54,12 @@
 - `GET /api/help` возвращает `{documents,faq}` после проверки сессии. Каталог состоит из записей `{id,title,description,fields}` и доступен студенту. FAQ ограничен ролью. Запись FAQ содержит `{id,title,text,view,target,terms}`.
 - `GET /api/help?q=…` возвращает `{answer,found}`. В ответе есть `id,title,text,view,target`. Неизвестный вопрос даёт `found:false` и путь в сообщения. Вопросы не сохраняются.
 - `POST /api/requests` принимает `{type}` с точным названием из каталога. Исторические заявки сохраняются. Нужен только выбор вида документа.
-- Результаты поиска `document` и `faq` ведут к `document-{id}` в `requests` и `faq-{id}` в `help` соответственно.
+- Результаты поиска `document` и `faq` ведут к `document-{id}` в `requests` и `faq-{id}` через маршрут `help` соответственно. Клиент открывает FAQ в диалоге, без пункта меню.
 
 ## Библиотека
 
 Аутентифицированный `GET /api/library` отдаёт демонстрационный каталог `{books:[{id,title,author,subject,description,favorite}]}`. Поиск по названию и автору и фильтр дисциплины применяются к этому общему каталогу на клиенте. `POST /api/library/:id/favorite` принимает `{favorite:boolean}`. Владелец избранного определяется сессией. Установка и снятие отметки идемпотентны.
+
+## Запланированные изменения API
+
+На следующий этап новые маршруты и изменения форматов не согласованы. Размещение с HTTPS не добавляет маршруты.
