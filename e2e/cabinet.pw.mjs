@@ -693,3 +693,22 @@ for (const [role, unavailable] of [['teacher', 'Справки и докумен
     await fits(page);
   });
 }
+
+test('Chromium loads and applies both responsive stylesheets', async ({ page, cabinet }) => {
+  const assets = ['/mobile.css', '/desktop-tablet.css'];
+  const responses = assets.map((path) => page.waitForResponse((response) => new URL(response.url()).pathname === path));
+  await page.setViewportSize({ width: 390, height: 760 });
+  await login(page, cabinet);
+  for (const response of await Promise.all(responses)) {
+    expect(response.status()).toBe(200);
+    expect(response.headers()['content-type']).toMatch(/^text\/css(?:;|$)/i);
+  }
+  const loaded = await page.evaluate(() => [...globalThis.document.styleSheets]
+    .filter((sheet) => sheet.href && sheet.cssRules.length)
+    .map((sheet) => new URL(sheet.href).pathname));
+  expect(loaded).toEqual(expect.arrayContaining(assets));
+  await expect(page.locator('.mobile-tabs')).toHaveCSS('position', 'fixed');
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await expect(page.locator('.sidebar')).toHaveCSS('width', '164px');
+  await expect(page.locator('.mobile-tabs')).toBeHidden();
+});

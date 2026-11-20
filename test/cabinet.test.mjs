@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -50,7 +50,16 @@ test('student accounts, schedule ownership and session revocation', { timeout: 2
 
   const home = await request('/');
   assert.equal(home.status, 200);
-  assert.match(await home.text(), /Конкурсный прототип\. Неофициальный сервис/);
+  const html = await home.text();
+  assert.match(html, /Конкурсный прототип\. Неофициальный сервис/);
+  for (const file of ['mobile.css', 'desktop-tablet.css']) {
+    assert.ok(html.includes(`href="/${file}"`));
+    const asset = await request('/' + file);
+    assert.equal(asset.status, 200, file);
+    assert.match(asset.headers.get('content-type'), /^text\/css(?:;|$)/i, file);
+    assert.equal(asset.headers.get('x-content-type-options'), 'nosniff');
+    assert.deepEqual(Buffer.from(await asset.arrayBuffer()), await readFile(new URL('../public/' + file, import.meta.url)));
+  }
   for (const path of ['/app.js', '/styles.css']) assert.equal((await request(path)).status, 200);
   for (const path of ['/server.mjs', '/data/local-demo.env', '/data/student-cabinet.sqlite']) {
     assert.equal((await request(path)).status, 404);
