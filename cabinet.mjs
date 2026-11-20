@@ -1,6 +1,7 @@
 import { crc32, inflateRawSync } from 'node:zlib';
 import { certificatePdf, certificatePrint } from './certificate.mjs';
 import { answerFor, documents, faqFor } from './knowledge.mjs';
+import { createPortfolio, migratePortfolio } from './portfolio.mjs';
 
 const PDF = 'application/pdf';
 const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -339,6 +340,7 @@ export function seedCabinet(db, week) {
     CREATE UNIQUE INDEX messages_client_id ON messages(dialogue_id, sender_id, client_id);
     PRAGMA user_version = 6;
   `);
+  if (version < 7) migratePortfolio(db);
 }
 
 function isPdf(contents) {
@@ -969,6 +971,7 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
   }
 
   const routes = [
+    ...createPortfolio(db, { HttpError, bytesBody, isPdf, now, text }),
     { method: 'GET', path: /^\/api\/library$/, action: library },
     { method: 'POST', path: /^\/api\/library\/([^/]+)\/favorite$/, action: setFavorite },
     { method: 'GET', path: /^\/api\/cabinet$/, action: cabinet },
@@ -1017,7 +1020,8 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
       });
       return json(response, 200, { ok: true, ...result });
     }
-    const result = await route.action(viewer, id);
+    const query = route.query ? new URL(request.url, 'http://localhost').searchParams : undefined;
+    const result = await route.action(viewer, id, query);
     if (route.print) {
       response.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',

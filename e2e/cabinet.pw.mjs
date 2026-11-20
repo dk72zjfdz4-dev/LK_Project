@@ -820,3 +820,86 @@ for (const width of [360, 440, 768, 1440]) {
     await fits(page);
   });
 }
+
+for (const width of [360, 440]) {
+  test(`student portfolio and PDF at ${width} px`, async ({ page, browser, cabinet }) => {
+    await page.setViewportSize({ width, height: 760 });
+    await login(page, cabinet);
+    await page.locator('.mobile-tabs [data-view=profile]').click();
+    const portfolio = page.locator('#portfolio');
+    await expect(portfolio.getByRole('heading', { name: 'Моё портфолио' })).toBeVisible();
+    await portfolio.getByText('Добавить достижение', { exact: true }).click();
+    const title = 'Демонстрационная обсерватория ' + width;
+    const achievement = portfolio.locator('#portfolio-new-achievement');
+    await achievement.locator('[name=title]').fill(title);
+    await achievement.locator('[name=category]').selectOption('projects');
+    await achievement.locator('[name=date]').fill('2026-10-20');
+    await achievement.locator('[name=description]').fill('Проект учебной модели.');
+    await achievement.locator('[name=organizer]').fill('Демо-кружок');
+    await achievement.locator('button[type=submit]').click();
+    const item = portfolio.locator('details[id^="portfolio-achievement-"]').filter({ hasText: title }).first();
+    await expect(item).toBeVisible();
+    await item.getByText('Прикрепить файл', { exact: true }).click();
+    const file = item.locator('input[type=file]');
+    await file.setInputFiles({
+      name: 'demo.png', mimeType: 'image/png',
+      buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64'),
+    });
+    await item.locator('form[id^="portfolio-achievement-file-"] button[type=submit]').click();
+    await expect(item.getByRole('link', { name: /demo.png/ })).toBeVisible();
+    const submit = item.locator('form[id^="portfolio-achievement-submit-"]');
+    await submit.locator('[name=reviewerId]').selectOption({ label: 'Мария Ланская' });
+    await submit.locator('button[type=submit]').click();
+    await expect(item.locator(':scope > summary')).toContainText('На проверке');
+    const id = (await item.getAttribute('id')).split('-').at(-1);
+    const exportPanel = portfolio.locator('#portfolio-export');
+    await exportPanel.locator('#portfolio-export-achievement-' + id).check();
+    const downloadEvent = page.waitForEvent('download');
+    await exportPanel.locator('#portfolio-pdf').click();
+    const download = await downloadEvent;
+    expect(download.suggestedFilename()).toMatch(/\.pdf$/);
+    if (width === 360) {
+      await download.saveAs('test-results/portfolio-360.pdf');
+      await page.context().addInitScript(() => { globalThis.print = () => {}; });
+      const [print] = await Promise.all([page.waitForEvent('popup'), exportPanel.locator('#portfolio-print').click()]);
+      await expect(print.locator('main')).toContainText('Статус подтверждения: На проверке');
+      await expect(print.locator('nav, button, dialog')).toHaveCount(0);
+      await print.close();
+    }
+    await portfolio.getByText('Запросить рекомендацию', { exact: true }).first().click();
+    const recommendation = portfolio.locator('#portfolio-new-recommendation');
+    const goal = 'Демонстрационный исследовательский отбор ' + width;
+    await recommendation.locator('[name=teacherId]').selectOption({ label: 'Мария Ланская' });
+    await recommendation.locator('[name=goal]').fill(goal);
+    await recommendation.locator('[name=context]').fill('Учебный макет обсерватории');
+    await recommendation.locator('[name=deadline]').fill(new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10));
+    await recommendation.locator('button[type=submit]').click();
+    const studentRequest = portfolio.locator('#portfolio-recommendation-list details').filter({ hasText: goal }).first();
+    await expect(studentRequest).toBeVisible();
+    if (width === 360) {
+      const teacher = await browser.newContext({ viewport: { width, height: 760 } });
+      try {
+        const staff = await teacher.newPage();
+        await login(staff, cabinet, 'teacher');
+        await staff.locator('.mobile-tabs [data-view=profile]').click();
+        const pending = staff.locator('#portfolio-recommendation-list details').filter({ hasText: goal }).first();
+        await pending.locator(':scope > summary').click();
+        const review = pending.locator('form[id^=portfolio-recommendation-review]');
+        await review.locator('[name=status]').selectOption('accepted');
+        await review.locator('button[type=submit]').click();
+        await pending.getByText('Черновик рекомендации', { exact: true }).click();
+        const draft = pending.locator('form[id^=portfolio-recommendation-draft]');
+        await draft.locator('[name=text]').fill('Подготовила демонстрационную модель.');
+        await draft.locator('button[type=submit]').click();
+        await pending.getByRole('button', { name: 'Опубликовать рекомендацию', exact: true }).click();
+        await expect(pending.getByText('Подготовила демонстрационную модель.', { exact: true })).toBeVisible();
+        await page.locator('#portfolio-refresh').click();
+        await expect(studentRequest.locator(':scope > summary')).toContainText('Опубликована');
+        await fits(staff);
+      } finally {
+        await teacher.close();
+      }
+    }
+    await fits(page);
+  });
+}

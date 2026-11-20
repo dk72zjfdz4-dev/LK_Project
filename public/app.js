@@ -74,6 +74,10 @@ let pageHash = '';
 let library;
 let libraryLoad;
 const librarySaves = new Set();
+let portfolio;
+let portfolioLoad;
+let portfolioExportStudent = '';
+const portfolioExportSelection = new Set();
 let composingMessage = false;
 const messageStates = new Map();
 const renderedMessages = new Map();
@@ -154,6 +158,7 @@ function route(focusHeading = false) {
   renderCabinet();
   if (active === 'requests' && profile.role === 'student') loadHelpCatalog();
   if (active === 'library') loadLibrary();
+  if (active === 'profile') loadPortfolio();
   heading.classList.toggle('pointer-navigation', pointerNavigation);
   pointerNavigation = false;
   if (focusHeading || pendingTarget) {
@@ -226,6 +231,13 @@ function showLogin(message = '', focusHeading = false) {
   resetHelpQuestion();
   library = libraryLoad = undefined;
   librarySaves.clear();
+  portfolio = portfolioLoad = undefined;
+  portfolioExportStudent = '';
+  portfolioExportSelection.clear();
+  byId('portfolio-refresh').disabled = false;
+  for (const id of ['portfolio-achievements', 'portfolio-recommendations', 'portfolio-export']) {
+    byId(id).hidden = true;
+  }
   byId('library-filters').reset();
   byId('library-subject').options.length = 1;
   byId('library-retry').hidden = true;
@@ -260,6 +272,8 @@ function showLogin(message = '', focusHeading = false) {
     'dialogues-content', 'updates-content', 'contacts-content', 'dialogue-contact', 'lesson-dialog-content', 'action-status',
     'documents-content', 'document-catalog-status', 'faq-status',
     'library-results', 'library-status', 'library-error',
+    'portfolio-status', 'portfolio-achievement-create', 'portfolio-achievement-list',
+    'portfolio-recommendation-create', 'portfolio-recommendation-list', 'portfolio-export',
   ]) byId(id).replaceChildren();
   for (const id of [
     ...Object.keys(profileFields),
@@ -310,6 +324,7 @@ function showApp(account, focusHeading = false) {
     if (profile.role === 'student') loadSchedule({ quiet: true });
     loadCabinet({ quiet: true });
     if (activeView === 'messages' && selectedDialogue !== undefined) refreshDialogue(true);
+    if (activeView === 'profile') loadPortfolio({ quiet: true });
   }, 12000);
 }
 
@@ -749,16 +764,17 @@ function renderSection(id, data, draw, force) {
   const formInUse = root.contains(focused) && focused?.closest('form');
   const dirtyForm = root.querySelector('form[data-dirty]');
   const editingRequests = id === 'requests-content';
+  const savedPortfolioRecord = force && root.hasAttribute('data-portfolio-record');
   if (editingRequests) {
     if (!force && root.querySelector('form[aria-busy="true"]')) return;
-  } else if (dirtyForm || (!force && (formInUse || root.querySelector('form[aria-busy="true"]')))) {
+  } else if (!savedPortfolioRecord && (dirtyForm || (!force && (formInUse || root.querySelector('form[aria-busy="true"]'))))) {
     if (id === 'assignments-content') reconcileClosedAppeals(data[1], data[2]);
     return;
   }
-  const drafts = editingRequests
+  const drafts = editingRequests || savedPortfolioRecord
     ? [...root.querySelectorAll('form[data-dirty]')].map((form) => [form.id, [...form.elements]
       .filter((field) => field.name)
-      .map((field) => [field.name, field.value, field.selectionStart, field.selectionEnd])])
+      .map((field) => [field.name, field.value, field.selectionStart, field.selectionEnd, field.type === 'file' ? field : null])])
     : [];
   if (editingRequests) {
     for (const note of root.querySelectorAll('[data-unsubmitted-note]')) {
@@ -777,6 +793,7 @@ function renderSection(id, data, draw, force) {
   for (const [formId, fields] of drafts) {
     const form = byId(formId);
     if (!form) {
+      if (!editingRequests) continue;
       const details = byId(formId.replace('request-status-', 'request-'));
       const note = fields.find(([name]) => name === 'note')?.[1];
       if (details && note) {
@@ -786,15 +803,23 @@ function renderSection(id, data, draw, force) {
       }
       continue;
     }
-    for (const [name, value, start, end] of fields) {
+    for (const [name, value, start, end, fileInput] of fields) {
       const field = form.elements.namedItem(name);
       if (!field) continue;
+      if (fileInput) {
+        field.replaceWith(fileInput);
+        continue;
+      }
       if (field.tagName === 'SELECT' && ![...field.options].some((option) => option.value === value)) {
         field.selectedIndex = -1;
         continue;
       }
       field.value = value;
       if (Number.isInteger(start)) field.setSelectionRange(start, end);
+      if (savedPortfolioRecord) {
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        field.dispatchEvent(new Event('change', { bubbles: true }));
+      }
     }
     form.dataset.dirty = '';
   }
@@ -1106,7 +1131,7 @@ function renderDialogueContact(item) {
   renders.set('dialogue-contact', signature);
 }
 
-function formFor(id, buttonText, fields, submit, { quiet = false, onSaved } = {}) {
+function formFor(id, buttonText, fields, submit, { quiet = false, onSaved, reload } = {}) {
   const form = element('form', 'cabinet-form');
   form.id = id;
   for (const field of fields) {
@@ -1129,6 +1154,13 @@ function formFor(id, buttonText, fields, submit, { quiet = false, onSaved } = {}
     for (const property of ['min', 'max', 'step', 'maxLength', 'accept']) {
       if (field[property] !== undefined) input[property] = field[property];
     }
+    if (field.value !== undefined) {
+      if (field.options) {
+        for (const option of input.options) option.defaultSelected = option.value === String(field.value);
+      } else {
+        input.defaultValue = field.value;
+      }
+    }
     const label = element('label', '', field.label);
     label.htmlFor = input.id;
     wrapper.append(label, input);
@@ -1144,12 +1176,12 @@ function formFor(id, buttonText, fields, submit, { quiet = false, onSaved } = {}
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     if (button.disabled) return;
-    performForm(form, error, submit, { onSaved, quiet });
+    performForm(form, error, submit, { onSaved, quiet, reload });
   });
   return form;
 }
 
-async function performForm(form, output, submit, { onSaved, quiet = false, isCurrent = () => true } = {}) {
+async function performForm(form, output, submit, { onSaved, quiet = false, isCurrent = () => true, reload = loadCabinet } = {}) {
   const account = profile;
   const view = activeView;
   const button = form.querySelector('button[type="submit"]');
@@ -1160,17 +1192,18 @@ async function performForm(form, output, submit, { onSaved, quiet = false, isCur
   form.setAttribute('aria-busy', 'true');
   output.textContent = '';
   try {
-    await submit(data);
+    const result = await submit(data);
     if (profile !== account) return;
     if (isCurrent()) {
       form.reset();
       delete form.dataset.dirty;
-      onSaved?.();
+      onSaved?.(result);
     }
     if (!quiet) byId('action-status').textContent = 'Изменения сохранены.';
-    await loadCabinet({
+    await reload({
       fresh: true,
       refreshView: view,
+      form,
       afterRender: () => {
         if (activeView !== view || !isCurrent()) return;
         const focused = document.activeElement;
@@ -1670,6 +1703,476 @@ function renderAppeal(item, assignment, student) {
     })));
   }
   return detail;
+}
+
+const portfolioAchievementPath = '/api/portfolio/achievements';
+const portfolioRecommendationPath = '/api/portfolio/recommendations';
+const achievementCategories = {
+  study: 'Учёба',
+  research: 'Наука',
+  projects: 'Проекты',
+  olympiads: 'Олимпиады и конкурсы',
+  volunteering: 'Волонтёрство',
+  sports: 'Спорт',
+  creativity: 'Творчество',
+  internships: 'Стажировки',
+};
+const portfolioStatuses = {
+  draft: ['Черновик', 'submitted'],
+  pending: ['На проверке', 'processing'],
+  confirmed: ['Подтверждено', 'ready'],
+  clarification: ['Нужно уточнение', 'processing'],
+  rejected: ['Отклонено', 'rejected'],
+  accepted: ['Принят в работу', 'processing'],
+  published: ['Опубликована', 'ready'],
+};
+const portfolioActionLabels = {
+  created: 'Создан черновик',
+  edited: 'Изменены сведения',
+  file_attached: 'Загружено вложение',
+  file_removed: 'Удалено вложение',
+  submitted: 'Отправлено на проверку',
+  requested: 'Запрошена рекомендация',
+  resubmitted: 'Отправлено уточнение',
+  published: 'Опубликована версия',
+};
+const portfolioFileTypes = { pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png' };
+const portfolioDate = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'long', timeZone: 'UTC' });
+
+async function loadPortfolio({ quiet = false, fresh = false, afterRender, form } = {}) {
+  const account = profile;
+  if (!account || (portfolioLoad && !fresh)) return;
+  const load = {};
+  const status = byId('portfolio-status');
+  const refresh = byId('portfolio-refresh');
+  portfolioLoad = load;
+  if (!quiet) {
+    refresh.disabled = true;
+    status.textContent = portfolio ? '' : 'Загружаем портфолио…';
+  }
+  try {
+    const payload = await request('/api/portfolio');
+    if (profile !== account || portfolioLoad !== load) return;
+    portfolio = payload;
+    status.textContent = form ? 'Изменения сохранены.' : '';
+    const forceId = form?.closest('[data-portfolio-record]')?.id;
+    preservePagePosition(() => renderPortfolio(forceId));
+    if (activeView === 'profile') revealTarget();
+    afterRender?.();
+  } catch (error) {
+    if (profile !== account || portfolioLoad !== load || endSession(error)) return;
+    if (!quiet || !portfolio) status.textContent = error.message;
+  } finally {
+    if (portfolioLoad === load) {
+      portfolioLoad = undefined;
+      refresh.disabled = false;
+    }
+  }
+}
+
+function portfolioForm(id, label, fields, submit, onSaved) {
+  return formFor(id, label, fields, submit, { reload: loadPortfolio, quiet: true, onSaved });
+}
+
+function portfolioDetails(id, title) {
+  const details = element('details', 'record-details');
+  details.id = id;
+  const summary = element('summary', 'record-summary');
+  summary.id = id + '-summary';
+  summary.append(element('strong', 'record-labels', title));
+  details.append(summary);
+  return details;
+}
+
+function portfolioRecord(id, title, item, subtitle, pendingLabel = portfolioStatuses.pending[0]) {
+  const detail = portfolioDetails(id, title);
+  const summary = detail.firstElementChild;
+  if (subtitle) summary.firstElementChild.append(element('span', 'muted portfolio-record-subtitle', subtitle));
+  const [label, color] = portfolioStatuses[item.status] || [item.status, 'submitted'];
+  summary.append(statusBadge(item.status === 'pending' ? pendingLabel : label, color));
+  return detail;
+}
+
+function portfolioHistory(id, history) {
+  const detail = portfolioDetails(id, 'История изменений');
+  detail.classList.add('portfolio-action');
+  detail.append(listFor(history, (event) => {
+    const entry = element('div');
+    entry.append(element('strong', '', portfolioActionLabels[event.action] ?? portfolioStatuses[event.status]?.[0] ?? event.status));
+    entry.append(element('p', 'muted', [event.actorName, eventTime(event.createdAt)].filter(Boolean).join(' · ')));
+    if (event.reviewerName && event.action === 'submitted') {
+      entry.append(metadata([['Проверяющий', event.reviewerName]]));
+    }
+    if (event.note) entry.append(element('p', 'record-copy', event.note));
+    return entry;
+  }, 'Записей пока нет.'));
+  return detail;
+}
+
+function portfolioPersonOptions(people) {
+  return [['', 'Выберите сотрудника'], ...people.map(({ id, name, role }) => [
+    id, role === 'dean' ? name + ' · Деканат' : name,
+  ])];
+}
+
+function achievementForm(item = {}) {
+  const existing = Boolean(item.id);
+  const base = existing ? resource(portfolioAchievementPath, item.id) : portfolioAchievementPath;
+  return portfolioForm(existing ? 'portfolio-achievement-edit-' + item.id : 'portfolio-new-achievement',
+    existing ? 'Сохранить изменения' : 'Сохранить черновик', [
+      { name: 'title', label: 'Название', maxLength: 150, value: item.title },
+      { name: 'category', label: 'Категория', options: [['', 'Выберите категорию'], ...Object.entries(achievementCategories)], value: item.category },
+      { name: 'date', label: 'Дата достижения', type: 'date', value: item.date },
+      { name: 'organizer', label: 'Организатор', maxLength: 150, value: item.organizer },
+      { name: 'description', label: 'Описание', rows: 3, maxLength: 1500, required: false, value: item.description },
+    ], (data) => post(base, Object.fromEntries(data)), existing ? undefined : (result) => {
+      if (activeView === 'profile') pendingTarget = 'portfolio-achievement-' + result.id;
+    });
+}
+
+function uploadPortfolioFile(base, file) {
+  if (!file?.size) throw new Error('Выберите файл PDF, JPG или PNG.');
+  if (file.size > 10 * 1024 * 1024) throw new Error('Размер файла превышает 10 МБ.');
+  const extension = file.name.trim().toLowerCase().match(/\.([^.]+)$/)?.[1];
+  if (!Object.hasOwn(portfolioFileTypes, extension)) throw new Error('Выберите файл PDF, JPG или PNG.');
+  return request(base + '/file', {
+    method: 'POST',
+    headers: { 'Content-Type': portfolioFileTypes[extension], 'X-Filename': encodeURIComponent(file.name) },
+    body: file,
+  });
+}
+
+function portfolioDecisionForm(id, base, statuses) {
+  const form = portfolioForm(id, 'Сохранить решение', [
+    { name: 'status', label: 'Решение', options: [['', 'Выберите решение'], ...statuses.map((status) => [status, portfolioStatuses[status][0]])] },
+    { name: 'note', label: 'Комментарий', rows: 3, maxLength: 1500, required: false },
+  ], (data) => post(base + '/review', Object.fromEntries(data)));
+  const select = form.elements.namedItem('status');
+  const note = form.elements.namedItem('note');
+  select.addEventListener('change', () => { note.required = ['clarification', 'rejected'].includes(select.value); });
+  return form;
+}
+
+function renderPortfolioAchievement(item) {
+  const student = profile.role === 'student';
+  const id = 'portfolio-achievement-' + item.id;
+  const base = resource(portfolioAchievementPath, item.id);
+  const detail = portfolioRecord(id, item.title, item, student ? achievementCategories[item.category] : item.studentName);
+  detail.append(metadata([
+    ['Категория', achievementCategories[item.category] ?? item.category],
+    ['Дата', item.date && portfolioDate.format(dateAt(item.date))],
+    ['Организатор', item.organizer],
+    ['Описание', item.description],
+    ['Проверяющий', item.reviewerName],
+  ]));
+  if (item.attachment) {
+    const download = anchor(base + '/file', 'file-link', 'Скачать ' + item.attachment.filename);
+    download.id = id + '-download';
+    download.download = '';
+    detail.append(download);
+  }
+  detail.append(portfolioHistory(id + '-history', item.history));
+  if (student) {
+    const edit = portfolioDetails(id + '-edit', 'Изменить достижение');
+    edit.classList.add('portfolio-action');
+    if (item.status !== 'draft') edit.append(element('p', 'muted', 'После изменения запись станет черновиком. Для подтверждения отправьте её на проверку снова.'));
+    edit.append(achievementForm(item));
+    detail.append(edit);
+    const file = portfolioDetails(id + '-attachment', item.attachment ? 'Изменить вложение' : 'Прикрепить файл');
+    file.classList.add('portfolio-action');
+    if (item.status !== 'draft') file.append(element('p', 'muted', 'После изменения вложения запись станет черновиком.'));
+    file.append(portfolioForm('portfolio-achievement-file-' + item.id, item.attachment ? 'Заменить файл' : 'Загрузить файл', [
+      { name: 'file', label: 'Файл PDF, JPG или PNG до 10 МБ', type: 'file', accept: '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png' },
+    ], (data) => uploadPortfolioFile(base, data.get('file'))));
+    if (item.attachment) {
+      file.append(portfolioForm('portfolio-achievement-remove-file-' + item.id, 'Удалить вложение', [],
+        () => post(base + '/remove-file', {})));
+    }
+    detail.append(file);
+    if (['draft', 'clarification'].includes(item.status)) {
+      if (portfolio.reviewers.length) {
+        detail.append(portfolioForm('portfolio-achievement-submit-' + item.id, 'Отправить на проверку', [
+          { name: 'reviewerId', label: 'Проверяющий', options: portfolioPersonOptions(portfolio.reviewers), value: item.reviewerId || '' },
+        ], (data) => post(base + '/submit', { reviewerId: Number(data.get('reviewerId')) })));
+      } else {
+        detail.append(element('p', 'muted', 'Доступных проверяющих пока нет.'));
+      }
+    }
+    if (item.status === 'draft') {
+      const remove = portfolioDetails(id + '-remove', 'Удалить черновик');
+      remove.classList.add('portfolio-action');
+      remove.append(element('p', 'muted', 'Запись и вложение будут удалены.'), portfolioForm(
+        'portfolio-achievement-delete-' + item.id, 'Удалить достижение', [], () => post(base + '/delete', {}),
+        () => { if (activeView === 'profile') pendingTarget = 'portfolio-achievements-heading'; },
+      ));
+      detail.append(remove);
+    }
+  } else if (item.status === 'pending') {
+    detail.append(portfolioDecisionForm('portfolio-achievement-review-' + item.id, base, ['confirmed', 'clarification', 'rejected']));
+  }
+  return detail;
+}
+
+function recommendationForm(item = {}) {
+  const existing = Boolean(item.id);
+  const fields = [
+    { name: 'goal', label: 'Цель рекомендации', maxLength: 150, value: item.goal },
+    { name: 'context', label: 'Контекст', rows: 3, maxLength: 1500, required: false, value: item.context },
+    { name: 'deadline', label: 'Желаемый срок', type: 'date', value: item.deadline },
+  ];
+  if (!existing) fields.unshift({ name: 'teacherId', label: 'Преподаватель', options: portfolioPersonOptions(portfolio.teachers) });
+  const base = existing ? resource(portfolioRecommendationPath, item.id, '/resubmit') : portfolioRecommendationPath;
+  return portfolioForm(existing ? 'portfolio-recommendation-resubmit-' + item.id : 'portfolio-new-recommendation',
+    existing ? 'Отправить уточнение' : 'Отправить запрос', fields, (data) => {
+      const body = Object.fromEntries(data);
+      if (!existing) body.teacherId = Number(body.teacherId);
+      return post(base, body);
+    }, existing ? undefined : (result) => {
+      if (activeView === 'profile') pendingTarget = 'portfolio-recommendation-' + result.id;
+    });
+}
+
+function recommendationVersions(id, versions) {
+  const newest = versions.reduce((latest, version) => version.version > latest.version ? version : latest);
+  const versionsPanel = portfolioDetails(id + '-versions', 'Предыдущие версии');
+  versionsPanel.classList.add('portfolio-action');
+  const published = element('section', 'portfolio-publication');
+  published.append(element('h4', '', 'Опубликованная рекомендация'), metadata([
+    ['Автор', newest.authorName], ['Опубликована', eventTime(newest.publishedAt)],
+  ]), element('p', 'record-copy', newest.text));
+  const previous = versions.filter((version) => version !== newest).sort((a, b) => b.version - a.version);
+  if (previous.length) {
+    versionsPanel.append(listFor(previous, (version) => {
+      const entry = element('div');
+      entry.append(element('strong', '', 'Версия ' + version.version), element('p', 'muted', eventTime(version.publishedAt)),
+        element('p', 'record-copy', version.text));
+      return entry;
+    }, ''));
+    published.append(versionsPanel);
+  }
+  return published;
+}
+
+function recommendationDraft(item, base) {
+  const draft = portfolioDetails('portfolio-recommendation-' + item.id + '-editor', 'Черновик рекомендации');
+  draft.classList.add('portfolio-action');
+  draft.append(element('p', 'muted', 'Черновик виден только вам. Сохраните текст перед публикацией.'));
+  const form = portfolioForm('portfolio-recommendation-draft-' + item.id, 'Сохранить черновик', [
+    { name: 'text', label: 'Текст рекомендации', rows: 5, maxLength: 2500, value: item.draft || '' },
+  ], (data) => post(base + '/draft', { text: data.get('text') }));
+  const publish = portfolioForm('portfolio-recommendation-publish-' + item.id,
+    item.versions.length ? 'Опубликовать новую версию' : 'Опубликовать рекомендацию', [],
+    () => post(base + '/publish', {}));
+  const publishButton = publish.querySelector('button');
+  publishButton.disabled = !item.draft;
+  const text = form.elements.namedItem('text');
+  text.addEventListener('input', () => { publishButton.disabled = !item.draft || text.value !== item.draft; });
+  draft.append(form, publish);
+  return draft;
+}
+
+function renderPortfolioRecommendation(item) {
+  const student = profile.role === 'student';
+  const id = 'portfolio-recommendation-' + item.id;
+  const base = resource(portfolioRecommendationPath, item.id);
+  const detail = portfolioRecord(id, item.goal, item, student ? item.teacherName : item.studentName, 'На рассмотрении');
+  detail.append(metadata([
+    ['Запрос отправлен', eventTime(item.createdAt)],
+    ['Желаемый срок', item.deadline && portfolioDate.format(dateAt(item.deadline))],
+    ['Контекст', item.context],
+  ]));
+  if (item.versions.length) detail.append(recommendationVersions(id, item.versions));
+  detail.append(portfolioHistory(id + '-history', item.history));
+  if (student && item.status === 'clarification') detail.append(recommendationForm(item));
+  if (profile.role === 'teacher') {
+    if (['pending', 'accepted'].includes(item.status)) {
+      const decisions = item.status === 'pending' ? ['accepted', 'clarification', 'rejected'] : ['clarification', 'rejected'];
+      detail.append(portfolioDecisionForm('portfolio-recommendation-review-' + item.id, base, decisions));
+    }
+    if (['accepted', 'published'].includes(item.status)) detail.append(recommendationDraft(item, base));
+  }
+  return detail;
+}
+
+function exportablePortfolio() {
+  const student = profile.role === 'student';
+  const records = [
+    ...portfolio.achievements.filter((item) => student || item.status === 'confirmed').map(({ id, studentId, studentName, title, status }) => ({
+      id, studentId, studentName, type: 'achievement', label: title, statusLabel: portfolioStatuses[status]?.[0],
+    })),
+    ...portfolio.recommendations.filter((item) => item.versions.length).map(({ id, studentId, studentName, goal, teacherName }) => ({
+      id, studentId, studentName, type: 'recommendation', label: goal, statusLabel: teacherName,
+    })),
+  ];
+  const ids = new Set(records.map(portfolioExportId));
+  for (const id of portfolioExportSelection) if (!ids.has(id)) portfolioExportSelection.delete(id);
+  return records;
+}
+
+function portfolioExportId(item) {
+  return 'portfolio-export-' + item.type + '-' + item.id;
+}
+
+function portfolioExport(records) {
+  const isStudent = profile.role === 'student';
+  const children = [element('h3', '', 'Экспорт портфолио')];
+  if (!records.length) {
+    return [...children, element('p', 'empty-state', 'Нет записей для экспорта.')];
+  }
+  const body = element('div', 'portfolio-export-body');
+  children.push(body);
+  if (!isStudent) {
+    const students = new Map(records.map((item) => [String(item.studentId), item.studentName]));
+    const field = element('div', 'form-field portfolio-student-select');
+    const label = element('label', '', 'Студент');
+    const select = element('select');
+    label.htmlFor = select.id = 'portfolio-export-student';
+    for (const [id, name] of [['', 'Выберите студента'], ...students]) {
+      const option = element('option', '', name);
+      option.value = id;
+      select.append(option);
+    }
+    if (!students.has(portfolioExportStudent)) portfolioExportStudent = '';
+    select.value = portfolioExportStudent;
+    select.addEventListener('change', () => {
+      portfolioExportStudent = select.value;
+      portfolioExportSelection.clear();
+      drawChoices();
+    });
+    field.append(label, select);
+    children.splice(1, 0, field);
+  }
+
+  function drawChoices() {
+    const eligible = isStudent ? records : records.filter((item) => String(item.studentId) === portfolioExportStudent);
+    body.replaceChildren();
+    if (!eligible.length) return;
+    const pdf = anchor('', 'button button-primary', 'Скачать PDF');
+    pdf.id = 'portfolio-pdf';
+    pdf.download = '';
+    const print = anchor('', 'button button-secondary', 'Печать');
+    print.id = 'portfolio-print';
+    print.target = '_blank';
+    print.rel = 'noopener';
+    const actions = element('div', 'portfolio-export-actions');
+    pdf.setAttribute('role', 'link');
+    print.setAttribute('role', 'link');
+    actions.append(pdf, print);
+    const fields = new Map();
+    for (const [type, title] of [['achievement', 'Достижения'], ['recommendation', 'Рекомендации']]) {
+      const items = eligible.filter((item) => item.type === type);
+      if (!items.length) continue;
+      const fieldset = element('fieldset', 'portfolio-export-choices');
+      fieldset.append(element('legend', '', title));
+      for (const item of items) {
+        const label = element('label', 'portfolio-export-option');
+        const checkbox = element('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = portfolioExportId(item);
+        checkbox.checked = portfolioExportSelection.has(checkbox.id);
+        fields.set(checkbox, item);
+        checkbox.addEventListener('change', () => {
+          if (checkbox.checked) portfolioExportSelection.add(checkbox.id);
+          else portfolioExportSelection.delete(checkbox.id);
+          updateLinks();
+        });
+        const copy = element('span');
+        copy.append(element('strong', '', item.label));
+        if (item.statusLabel) copy.append(element('span', 'muted', item.statusLabel));
+        label.append(checkbox, copy);
+        fieldset.append(label);
+      }
+      body.append(fieldset);
+    }
+    body.prepend(element('p', 'muted', 'Отметьте записи для PDF и печати.'));
+    body.append(actions);
+    updateLinks();
+
+    function updateLinks() {
+      const selected = [...fields].filter(([checkbox]) => checkbox.checked).map(([, item]) => item);
+      const params = new URLSearchParams();
+      if (!isStudent) params.set('studentId', portfolioExportStudent);
+      params.set('achievementIds', selected.filter((item) => item.type === 'achievement').map((item) => item.id).join(','));
+      params.set('recommendationIds', selected.filter((item) => item.type === 'recommendation').map((item) => item.id).join(','));
+      for (const [link, path] of [[pdf, 'pdf'], [print, 'print']]) {
+        if (selected.length) {
+          link.href = '/api/portfolio/' + path + '?' + params;
+          link.removeAttribute('aria-disabled');
+          link.removeAttribute('tabindex');
+        } else {
+          link.removeAttribute('href');
+          link.setAttribute('aria-disabled', 'true');
+          link.tabIndex = -1;
+        }
+      }
+    }
+  }
+  drawChoices();
+  return children;
+}
+
+function renderPortfolioRecords(host, type, items, draw, empty, forceId) {
+  const container = byId(host);
+  if (!items.length) {
+    for (const row of container.querySelectorAll('[data-portfolio-record]')) renders.delete(row.id);
+    if (!container.querySelector('.empty-state')) container.replaceChildren(element('p', 'empty-state', empty));
+    return;
+  }
+  container.querySelector(':scope > .empty-state')?.remove();
+  let list = container.querySelector('ul');
+  if (!list) {
+    list = element('ul', 'record-list');
+    container.append(list);
+  }
+  const visible = new Set(items.map((item) => 'portfolio-' + type + '-row-' + item.id));
+  for (const row of [...list.children]) {
+    if (!visible.has(row.id)) {
+      renders.delete(row.id);
+      row.remove();
+    }
+  }
+  items.forEach((item, index) => {
+    const id = 'portfolio-' + type + '-row-' + item.id;
+    let row = byId(id);
+    if (!row) {
+      row = element('li', 'record-row');
+      row.id = id;
+      row.dataset.portfolioRecord = '';
+    }
+    if (list.children[index] !== row) list.insertBefore(row, list.children[index] || null);
+    const data = type === 'achievement' ? [item, portfolio.reviewers] : item;
+    renderSection(id, data, () => [draw(item)], id === forceId);
+  });
+}
+
+function renderPortfolio(forceId) {
+  const student = profile.role === 'student';
+  byId('portfolio-heading').textContent = student ? 'Моё портфолио' : 'Портфолио студентов';
+  byId('portfolio-achievements').hidden = false;
+  byId('portfolio-recommendations').hidden = profile.role === 'dean';
+  byId('portfolio-export').hidden = false;
+  byId('portfolio-achievements-heading').textContent = student ? 'Достижения' : 'Достижения студентов';
+  byId('portfolio-recommendations-heading').textContent = student ? 'Рекомендации' : 'Запросы рекомендаций';
+  if (student) {
+    renderSection('portfolio-achievement-create', true, () => {
+      const detail = portfolioDetails('portfolio-achievement-new', 'Добавить достижение');
+      detail.classList.add('portfolio-action');
+      detail.append(achievementForm());
+      return [detail];
+    });
+    renderSection('portfolio-recommendation-create', portfolio.teachers, (teachers) => {
+      if (!teachers.length) return [element('p', 'muted', 'Доступных для запроса преподавателей пока нет.')];
+      const detail = portfolioDetails('portfolio-recommendation-new', 'Запросить рекомендацию');
+      detail.classList.add('portfolio-action');
+      detail.append(recommendationForm());
+      return [detail];
+    });
+  }
+  renderPortfolioRecords('portfolio-achievement-list', 'achievement', portfolio.achievements,
+    renderPortfolioAchievement, 'Достижений пока нет.', forceId);
+  renderPortfolioRecords('portfolio-recommendation-list', 'recommendation', portfolio.recommendations,
+    renderPortfolioRecommendation, 'Запросов рекомендаций пока нет.', forceId);
+  renderSection('portfolio-export', exportablePortfolio(), portfolioExport);
 }
 
 let newDialogueMode = false;
@@ -2285,6 +2788,7 @@ window.visualViewport?.addEventListener('resize', () => {
 });
 window.visualViewport?.addEventListener('scroll', sizeHelpDialog);
 byId('library-retry').addEventListener('click', loadLibrary);
+byId('portfolio-refresh').addEventListener('click', () => loadPortfolio({ fresh: true }));
 byId('library-filters').addEventListener('submit', (event) => event.preventDefault());
 byId('library-query').addEventListener('input', renderLibrary);
 byId('library-subject').addEventListener('change', renderLibrary);
@@ -2295,6 +2799,7 @@ document.addEventListener('visibilitychange', () => {
   if (profile.role === 'student') loadSchedule({ quiet: true });
   loadCabinet({ quiet: true });
   if (activeView === 'messages' && selectedDialogue !== undefined) refreshDialogue(true);
+  if (activeView === 'profile') loadPortfolio({ quiet: true });
 });
 
 byId('login-form').addEventListener('submit', async (event) => {

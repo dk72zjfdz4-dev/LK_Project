@@ -16,7 +16,7 @@ function certificateFields({ id, fullName, date }) {
   ];
 }
 
-function escapeHtml(value) {
+export function escapeHtml(value) {
   const entities = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
   return value.replace(/[&<>"']/g, (character) => entities[character]);
 }
@@ -25,38 +25,31 @@ export function certificatePrint(data) {
   const fields = certificateFields(data).map(([label, value]) => (
     '<div><dt>' + label + '</dt><dd>' + escapeHtml(value) + '</dd></div>'
   )).join('');
+  return printableDocument('Демонстрационная справка', `<p class="notice">${notice}</p>
+    <h1>${escapeHtml(data.type)}</h1>
+    <dl>${fields}</dl>`);
+}
+
+export function printableDocument(title, markup) {
   return `<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Демонстрационная справка</title>
+  <title>${escapeHtml(title)}</title>
   <link rel="stylesheet" href="/certificate-print.css">
   <script src="/certificate-print.js" defer></script>
 </head>
 <body>
   <main>
-    <p class="notice">${notice}</p>
-    <h1>${escapeHtml(data.type)}</h1>
-    <dl>${fields}</dl>
+    ${markup}
   </main>
 </body>
 </html>`;
 }
 
 export function certificatePdf(data) {
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({
-      size: 'A4',
-      margin: 56,
-      info: { Title: 'Демонстрационная справка', Creator: 'Конкурсный прототип' },
-    });
-    const chunks = [];
-    doc.on('data', (chunk) => chunks.push(chunk));
-    doc.once('end', () => resolve(Buffer.concat(chunks)));
-    doc.once('error', reject);
-    doc.rect(0, 0, doc.page.width, doc.page.height).fill('#fff');
-    doc.font(font);
+  return documentPdf('Демонстрационная справка', (doc) => {
     doc.fillColor('#101828').fontSize(15).text(notice, { lineGap: 4 });
     doc.moveDown(1.8).fontSize(25).text(data.type, { lineGap: 4 });
     doc.moveDown(1.5);
@@ -65,6 +58,23 @@ export function certificatePdf(data) {
       doc.fillColor('#101828').fontSize(15).text(value, { lineGap: 4 });
       doc.moveDown(0.9);
     }
+  });
+}
+
+export function documentPdf(title, draw) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({
+      size: 'A4',
+      margin: 56,
+      info: { Title: title, Creator: 'Конкурсный прототип' },
+    });
+    const chunks = [];
+    doc.on('data', (chunk) => chunks.push(chunk));
+    doc.once('end', () => resolve(Buffer.concat(chunks)));
+    doc.once('error', reject);
+    doc.rect(0, 0, doc.page.width, doc.page.height).fill('#fff');
+    doc.font(font).fillColor('#101828');
+    draw(doc);
     doc.end();
   });
 }

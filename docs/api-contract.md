@@ -46,6 +46,26 @@
 
 POST в таблице данных кабинета и POST для избранного отвечают JSON `{ok:true}`. Все POST требуют тот же origin. Для входа и выхода действуют ответы из первой таблицы. Чужой идентификатор возвращает 404, запрет роли 403. Все даты событий ISO, дедлайн принимает дату или ISO.
 
+## Портфолио
+
+Пути начинаются с `/api/portfolio`. Сессия обязательна, сервер проверяет роль, владельца и назначение. Результаты персональны и не кэшируются. Изменения отправляются POST с того же origin.
+
+| Метод и путь после префикса | Данные |
+|---|---|
+| GET / | `{achievements,recommendations,reviewers,teachers}` в области доступа |
+| POST /achievements и /achievements/:id | `{title,category,date,description,organizer}` |
+| GET или POST /achievements/:id/file | Скачивание или загрузка PDF, JPG, PNG. При загрузке передаются байты, MIME и закодированный `X-Filename`. Максимум 10 МиБ |
+| POST /achievements/:id/remove-file и /achievements/:id/delete | `{}` |
+| POST /achievements/:id/submit | `{reviewerId}` |
+| POST /achievements/:id/review | `{status,note}`, решение `confirmed,clarification,rejected` |
+| POST /recommendations | `{teacherId,goal,context,deadline}` |
+| POST /recommendations/:id/resubmit | `{goal,context,deadline}` |
+| POST /recommendations/:id/review | `{status,note}`, решение `accepted,clarification,rejected` |
+| POST /recommendations/:id/draft и /recommendations/:id/publish | `{text}` и `{}` соответственно |
+| GET /pdf и /print | `achievementIds` и `recommendationIds` как списки ID через запятую. Проверяющий указывает `studentId` |
+
+На проверку отправляется выбранная запись. Проверяющий видит только назначенные записи в действующей области доступа. Право преподавателя вычисляется по назначению студенту, право деканата требует привязки к группе. Студент видит свои достижения любых статусов и только опубликованные версии рекомендаций. Экспорт проверяющего ограничен подтверждёнными им достижениями и его опубликованными рекомендациями.
+
 ## Оценки и справки
 
 - `grades` включает `courseworkPoints,courseworkMax`. `points` равны исходным баллам плюс оценённые работы, `maxPoints` — исходному максимуму плюс максимумы опубликованных работ. `assignments.enrollmentId` соответствует `grades.id`. Подтверждённый итог находится в `result`.

@@ -964,6 +964,57 @@ details[open] > .record-summary::before { transform: rotate(45deg); }
 .local-error { color: #962247; }
 .local-error:empty { display: none; }
 
+.portfolio { min-width: 0; }
+.portfolio-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 12px;
+}
+.portfolio-header .button { margin: 0; }
+.portfolio-header > [role="status"] { flex: 0 0 100%; }
+.portfolio-header > [role="status"]:empty { display: none; }
+.portfolio h3 { font-size: 1.08rem; }
+.portfolio h4 { font-size: .94rem; }
+.portfolio .record-summary { overflow-wrap: anywhere; }
+.portfolio .record-copy { overflow-wrap: anywhere; }
+.portfolio-record-subtitle { font-size: .85rem; font-weight: 500; }
+.portfolio-action { margin-top: 6px; padding-inline: 10px; border-radius: 10px; background: var(--glass-dense); }
+.portfolio-action > .record-summary { grid-template-columns: 12px minmax(0, 1fr); }
+.portfolio .cabinet-form input[type="file"] { max-width: 100%; }
+.portfolio .file-link { overflow-wrap: anywhere; }
+.portfolio-publication { margin-block: 12px; padding: 12px; background: var(--glass-dense); border-radius: 10px; }
+.portfolio-student-select { max-width: 360px; margin-top: 12px; }
+.portfolio-student-select select {
+  min-height: 44px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--surface);
+}
+.portfolio-export-body { display: grid; gap: 10px; margin-top: 12px; }
+.portfolio-export-body:empty { display: none; }
+.portfolio-export-choices { min-width: 0; margin: 0; padding: 4px 10px; border: 1px solid var(--border); border-radius: 8px; }
+.portfolio-export-choices legend { padding-inline: 4px; font-weight: 650; }
+.portfolio-export-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding-block: 6px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.portfolio-export-option input { width: 18px; height: 18px; accent-color: var(--primary); }
+.portfolio-export-option span span { display: block; font-size: .84rem; }
+.portfolio-export-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.portfolio-export-actions .button { display: inline-flex; align-items: center; margin: 0; text-decoration: none; }
+.portfolio-export-actions .button[aria-disabled="true"] { opacity: .64; cursor: default; }
+
 .messaging {
   --messenger-space: clamp(10px, 1.6vw, 18px);
   display: grid;

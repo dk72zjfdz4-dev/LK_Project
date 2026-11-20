@@ -353,7 +353,7 @@
           </div>
         </section>
 
-        <section class="view" id="view-profile" aria-label="Профиль" hidden>
+        <section class="view cabinet-layout" id="view-profile" aria-label="Профиль" hidden>
           <div class="panel profile">
             <div class="profile-heading">
               <span class="avatar" id="profile-initials" aria-hidden="true"></span>
@@ -370,6 +370,24 @@
               <div><dt>Группа</dt><dd id="profile-group"></dd></div>
             </dl>
           </div>
+          <section class="portfolio cabinet-layout" id="portfolio" aria-labelledby="portfolio-heading">
+            <div class="panel portfolio-header">
+              <h2 id="portfolio-heading" tabindex="-1">Портфолио</h2>
+              <button class="button button-secondary" id="portfolio-refresh" type="button">Обновить</button>
+              <p class="muted" id="portfolio-status" role="status"></p>
+            </div>
+            <div class="panel" id="portfolio-achievements" hidden>
+              <h3 id="portfolio-achievements-heading" tabindex="-1">Достижения</h3>
+              <div id="portfolio-achievement-create"></div>
+              <div id="portfolio-achievement-list"></div>
+            </div>
+            <div class="panel" id="portfolio-recommendations" hidden>
+              <h3 id="portfolio-recommendations-heading">Рекомендации</h3>
+              <div id="portfolio-recommendation-create"></div>
+              <div id="portfolio-recommendation-list"></div>
+            </div>
+            <div class="panel" id="portfolio-export" hidden></div>
+          </section>
         </section>
       </main>
 
