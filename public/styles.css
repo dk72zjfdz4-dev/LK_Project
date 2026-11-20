@@ -898,6 +898,23 @@ details[open] > .record-summary::before { transform: rotate(45deg); }
 .status-processing { color: #6d4119; background: var(--peach); }
 .status-rejected { color: #852642; background: #fcebf0; }
 .grade-progress { display: block; width: 100%; max-width: 420px; height: 12px; accent-color: var(--primary); }
+.grade[open] .grade-summary-control { display: none; }
+.grade-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  font-weight: 650;
+}
+.grade-filters select {
+  max-width: 100%;
+  min-height: 44px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--surface);
+}
 
 .record-details .record-list { padding-left: 12px; border-left: 2px solid var(--border); }
 .record-details .record-list .record-row { padding-block: 6px; }
@@ -1200,7 +1217,8 @@ details[open] > .record-summary::before { transform: rotate(45deg); }
 }
 .message-form button[aria-expanded="true"] { background: var(--mint); }
 .message-form .local-error { font-size: .85rem; }
-.contact-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.contact-actions, .request-document-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.contact-actions .inline-link, .request-document-actions .inline-link { display: inline-flex; align-items: center; min-height: 44px; }
 .emoji-options {
   position: absolute;
   z-index: 2;

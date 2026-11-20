@@ -7,7 +7,7 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "build": "node --check server.mjs && node --check cabinet.mjs && node --check knowledge.mjs && node --check public/app.js",
+    "build": "node --check server.mjs && node --check cabinet.mjs && node --check knowledge.mjs && node --check certificate.mjs && node --check public/app.js && node --check public/certificate-print.js",
     "lint": "eslint .",
     "test": "node --test",
     "test:browser": "playwright test"
@@ -17,5 +17,8 @@
     "@playwright/test": "^1.65.1",
     "eslint": "^10.15.0",
     "globals": "^17.14.0"
+  },
+  "dependencies": {
+    "pdfkit": "^0.21.0"
   }
 }

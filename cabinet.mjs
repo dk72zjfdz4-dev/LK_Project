@@ -1,4 +1,5 @@
 import { crc32, inflateRawSync } from 'node:zlib';
+import { certificatePdf, certificatePrint } from './certificate.mjs';
 import { answerFor, documents, faqFor } from './knowledge.mjs';
 
 const PDF = 'application/pdf';
@@ -15,9 +16,15 @@ const demoTeacherIds = new Map([
   ['Сергей Вельский', 'sergey-velsky'],
 ]);
 
-export function demoContact(name) {
+function demoContact(name) {
   const id = demoTeacherIds.get(name);
-  return id ? { id, name, email: `${id.replace('-', '.')}@example.com` } : null;
+  return id ? { id, name, email: `${id.replace('-', '.')}@example.com`, teacherId: null } : null;
+}
+
+function teacherContact({ id: teacherId, login, name }) {
+  const demo = login === 'teacher1' ? demoContact(name) : null;
+  const id = `teacher-${teacherId}`;
+  return { ...(demo ?? { id, name, email: `${id}@example.com` }), teacherId };
 }
 
 const subjects = [
@@ -458,6 +465,7 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     SELECT e.id, subject, semester,
       coursework_points + COALESCE(SUM(s.points), 0) AS points,
       coursework_max + COALESCE(SUM(a.max_points), 0) AS maxPoints,
+      coursework_points AS courseworkPoints, coursework_max AS courseworkMax,
       control, result, criteria, student.full_name AS studentName
     FROM enrollments e JOIN students student ON student.id = e.student_id
     LEFT JOIN assignments a ON a.enrollment_id = e.id
@@ -476,6 +484,14 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     SELECT status, note, created_at AS createdAt FROM request_history WHERE request_id = ? ORDER BY id
   `);
   const requestById = prepare('SELECT student_id, status, type FROM requests WHERE id = ?');
+  const readyCertificate = prepare(`
+    SELECT r.id, r.type, student.full_name AS fullName, ready.created_at AS date
+    FROM requests r JOIN students student ON student.id = r.student_id
+    JOIN request_history ready ON ready.id = (
+      SELECT id FROM request_history WHERE request_id = r.id AND status = 'ready' ORDER BY id DESC LIMIT 1
+    )
+    WHERE r.id = ? AND r.student_id = ? AND r.status = 'ready'
+  `);
   const createRequest = prepare("INSERT INTO requests (student_id, type, status, created_at) VALUES (?, ?, 'submitted', ?)");
   const createHistory = prepare('INSERT INTO request_history (request_id, status, note, created_at) VALUES (?, ?, ?, ?)');
   const updateRequest = prepare('UPDATE requests SET status = ? WHERE id = ?');
@@ -483,7 +499,8 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
   const dialogues = prepare(`
     SELECT d.id,
       CASE WHEN partner.role = 'dean' THEN 'Деканат' ELSE partner.full_name END AS title,
-      CASE WHEN partner.role = 'teacher' THEN partner.full_name END AS teacherName,
+      CASE WHEN partner.role = 'teacher' THEN partner.id END AS teacherId,
+      CASE WHEN partner.role = 'teacher' THEN partner.login END AS teacherLogin,
       partner.full_name AS fullName,
       CASE partner.role WHEN 'dean' THEN 'Деканат' WHEN 'teacher' THEN 'Преподаватель'
         ELSE COALESCE(NULLIF(TRIM(partner.student_group), ''), 'Студент') END AS roleLabel,
@@ -496,14 +513,31 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     WHERE d.student_id = :viewerId OR d.staff_id = :viewerId
     ORDER BY last.created_at DESC, last.id DESC, d.id
   `);
-  const contactNames = prepare(`
-    SELECT teacher AS name FROM lessons WHERE student_id = :viewerId
-    UNION
-    SELECT staff.full_name FROM dialogues d JOIN students staff ON staff.id = d.staff_id
-    WHERE d.student_id = :viewerId AND staff.role = 'teacher'
-    UNION
-    SELECT staff.full_name FROM enrollments e JOIN students staff ON staff.id = e.teacher_id
-    WHERE e.student_id = :viewerId AND staff.role = 'teacher'
+  const accessibleTeachers = `
+    FROM students staff WHERE staff.role = 'teacher' AND staff.id IN (
+      SELECT e.teacher_id FROM enrollments e WHERE e.student_id = :studentId
+      UNION
+      SELECT d.staff_id FROM dialogues d WHERE d.student_id = :studentId
+    )
+  `;
+  const teacherContacts = prepare(`SELECT staff.id, staff.login, staff.full_name AS name ${accessibleTeachers}`);
+  const lessonContacts = prepare('SELECT DISTINCT title, teacher FROM lessons WHERE student_id = ?');
+  const enrolledLessonTeacher = prepare(`
+    SELECT staff.id, staff.login, staff.full_name AS name
+    FROM enrollments e JOIN students staff ON staff.id = e.teacher_id
+    WHERE e.student_id = ? AND e.subject = ? AND e.semester = ? AND staff.role = 'teacher' AND staff.full_name = ?
+      AND NOT EXISTS (
+        SELECT 1 FROM students peer WHERE peer.role = 'teacher' AND peer.full_name = staff.full_name AND peer.id <> staff.id
+      )
+  `);
+  const createTeacherDialogue = prepare(`
+    INSERT INTO dialogues (student_id, staff_id)
+    SELECT :studentId, staff.id ${accessibleTeachers} AND staff.id = :teacherId
+    ON CONFLICT(student_id, staff_id) DO NOTHING
+  `);
+  const teacherDialogue = prepare(`
+    SELECT d.id FROM dialogues d JOIN students staff ON staff.id = d.staff_id
+    WHERE d.student_id = ? AND d.staff_id = ? AND staff.role = 'teacher'
   `);
   const dialogueById = prepare('SELECT id FROM dialogues WHERE id = ? AND (student_id = ? OR staff_id = ?)');
   const messageFields = `
@@ -529,7 +563,7 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
   `);
   const createNotice = prepare('INSERT INTO notifications (account_id, title, text, created_at) VALUES (?, ?, ?, ?)');
   const assessments = prepare(`
-    SELECT a.id, e.subject, student.full_name AS studentName, a.title, a.description,
+    SELECT a.id, a.enrollment_id AS enrollmentId, e.subject, student.full_name AS studentName, a.title, a.description,
       a.due_at AS dueAt, a.max_points AS maxPoints,
       s.id AS submissionId, s.filename, s.points, s.comment, s.status
     FROM assignments a JOIN enrollments e ON e.id = a.enrollment_id
@@ -638,17 +672,31 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     return new Date().toISOString();
   }
 
+  function lessonContact(studentId, { title, teacher }) {
+    const staff = enrolledLessonTeacher.get(studentId, title, currentSemester, teacher);
+    return staff ? teacherContact(staff) : demoContact(teacher);
+  }
+
   function contacts(viewer) {
-    return viewer.role === 'student' ? contactNames.all({ viewerId: viewer.id })
-      .map(({ name }) => demoContact(name)).filter(Boolean)
-      .sort((first, second) => first.name.localeCompare(second.name, 'ru')) : [];
+    if (viewer.role !== 'student') return [];
+    const byId = new Map();
+    for (const lesson of lessonContacts.all(viewer.id)) {
+      const contact = lessonContact(viewer.id, lesson);
+      if (contact) byId.set(contact.id, contact);
+    }
+    for (const staff of teacherContacts.all({ studentId: viewer.id })) {
+      const contact = teacherContact(staff);
+      byId.set(contact.id, contact);
+    }
+    return [...byId.values()].sort((first, second) => first.name.localeCompare(second.name, 'ru'));
   }
 
   function cabinet(viewer) {
     const { id, role } = viewer;
     const conversations = dialogues.all({ viewerId: id })
-      .map(({ teacherName, lastMine, ...dialogue }) => ({
-        ...dialogue, lastMine: lastMine === null ? null : Boolean(lastMine), contact: demoContact(teacherName),
+      .map(({ teacherId, teacherLogin, lastMine, ...dialogue }) => ({
+        ...dialogue, lastMine: lastMine === null ? null : Boolean(lastMine),
+        contact: teacherId === null ? null : teacherContact({ id: teacherId, login: teacherLogin, name: dialogue.fullName }),
       }));
     return {
       grades: role === 'dean' ? [] : grades.all(id, role, id, role),
@@ -739,6 +787,25 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     createHistory.run(id, status, note, createdAt);
     const label = { processing: 'в обработке', ready: 'готова', rejected: 'отклонена' }[status];
     createNotice.run(request.student_id, 'Обновлён статус заявки', `${request.type} · ${label}.`, createdAt);
+  }
+
+  function studentCertificate(viewer, id) {
+    return found(readyCertificate.get(id, viewer.id), 'Готовая справка не найдена.');
+  }
+
+  async function requestPdf(viewer, id) {
+    const contents = await certificatePdf(studentCertificate(viewer, id));
+    return { filename: `certificate-${id}.pdf`, media_type: PDF, contents };
+  }
+
+  function requestPrint(viewer, id) {
+    return certificatePrint(studentCertificate(viewer, id));
+  }
+
+  function openTeacherDialogue(viewer, teacherId) {
+    createTeacherDialogue.run({ studentId: viewer.id, teacherId });
+    const { id: dialogueId } = found(teacherDialogue.get(viewer.id, teacherId), 'Преподаватель недоступен.');
+    return { dialogueId };
   }
 
   function ownedDialogue(viewer, id) {
@@ -907,7 +974,10 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     { method: 'GET', path: /^\/api\/cabinet$/, action: cabinet },
     { method: 'POST', path: /^\/api\/requests$/, role: 'student', action: submitRequest },
     { method: 'POST', path: /^\/api\/requests\/([^/]+)\/status$/, role: 'dean', action: changeRequest },
+    { method: 'GET', path: /^\/api\/requests\/([^/]+)\/pdf$/, role: 'student', download: true, action: requestPdf },
+    { method: 'GET', path: /^\/api\/requests\/([^/]+)\/print$/, role: 'student', print: true, action: requestPrint },
     { method: 'GET', path: /^\/api\/dialogues\/([^/]+)$/, action: dialogueMessages },
+    { method: 'POST', path: /^\/api\/dialogues\/teacher\/([^/]+)$/, role: 'student', action: openTeacherDialogue },
     { method: 'POST', path: /^\/api\/dialogues\/([^/]+)\/delivered$/, action: deliverMessages },
     { method: 'POST', path: /^\/api\/dialogues\/([^/]+)\/read$/, action: readDialogue },
     { method: 'POST', path: /^\/api\/dialogues\/([^/]+)\/messages$/, action: writeMessage },
@@ -947,7 +1017,14 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
       });
       return json(response, 200, { ok: true, ...result });
     }
-    const result = route.action(viewer, id);
+    const result = await route.action(viewer, id);
+    if (route.print) {
+      response.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Security-Policy': "default-src 'none'; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+      });
+      return response.end(result);
+    }
     if (!route.download) return json(response, 200, result);
     response.writeHead(200, {
       'Content-Type': result.media_type,
@@ -963,5 +1040,5 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     return answerFor(role, query);
   }
 
-  return { match, handle, search, help };
+  return { match, handle, search, help, lessonContact };
 }

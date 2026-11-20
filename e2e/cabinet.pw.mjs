@@ -275,6 +275,106 @@ test('message receipt visibility and retry after lost response in independent se
   }
 });
 
+for (const width of [360, 440]) {
+  test(`teacher chat, grades and ready certificate at ${width} px`, async ({ page, browser, cabinet }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await login(page, cabinet);
+    const data = async (path) => (await page.request.get(cabinet.origin + '/api' + path)).json();
+    const post = (client, path, body) => client.post(cabinet.origin + '/api' + path, {
+      headers: { Origin: cabinet.origin }, data: body,
+    });
+    const current = await data('/cabinet');
+    const teacher = current.contacts.find(({ teacherId }) => teacherId !== null);
+    const schedule = await data('/schedule');
+    const lesson = schedule.lessons.find(({ contact }) => contact?.teacherId === teacher.teacherId);
+    expect(lesson).toBeDefined();
+    await page.locator('.mobile-tabs [data-view=schedule]').click();
+    await page.locator('#day-picker label').filter({ has: page.locator('input[value="' + lesson.date + '"]') }).click();
+    await page.locator('#lesson-' + lesson.id + ' .lesson-link').click();
+    const lessonCard = page.locator('#lesson-dialog');
+    const write = lessonCard.getByRole('button', { name: 'Написать', exact: true });
+    await expect(write).toBeVisible();
+    await expect(lessonCard.getByRole('link', { name: 'Открыть почту' })).toHaveAttribute('href', /^mailto:/);
+    await write.click();
+    await expect(lessonCard).toBeHidden();
+    await expect(page.locator('#dialogue-heading')).toHaveText(teacher.name);
+    await expect(page.locator('#message-text')).toBeVisible();
+    await expect(page.locator('#dialogues-content')).toBeHidden();
+    await fits(page);
+    await page.getByRole('button', { name: 'Назад к диалогам' }).click();
+    await expect(page.locator('#dialogues-content')).toBeVisible();
+
+    const menu = page.locator('.mobile-tabs [data-view=menu]');
+    await menu.click();
+    await page.locator('#view-menu').getByRole('link', { name: 'Контакты', exact: true }).click();
+    const contacts = page.locator('#contacts-content .contact-card');
+    const linked = contacts.filter({ has: page.getByRole('heading', { name: teacher.name, exact: true }) });
+    await expect(contacts.filter({ hasText: 'переписка в кабинете недоступна' }).first()
+      .getByRole('button', { name: 'Написать', exact: true })).toHaveCount(0);
+    await linked.getByRole('button', { name: 'Написать', exact: true }).click();
+    await expect(page.locator('#dialogue-heading')).toHaveText(teacher.name);
+    expect((await data('/cabinet')).dialogues.filter(({ fullName }) => fullName === teacher.name)).toHaveLength(1);
+
+    await menu.click();
+    await page.locator('#view-menu').getByRole('link', { name: 'Успеваемость', exact: true }).click();
+    const semester = page.getByRole('combobox', { name: 'Семестр' });
+    const subject = page.locator('#grades-content details').filter({ hasText: 'Зельеварение' });
+    const summary = subject.locator('summary');
+    await expect(summary).toContainText('48 / 100');
+    await expect(summary).toContainText(/Зачёт|Экзамен/);
+    await summary.click();
+    await expect(subject).toContainText('36 / 40');
+    await expect(subject).toContainText('12 / 15');
+    await expect(subject.getByRole('link', { name: 'Разбор рецепта' }).first()).toBeVisible();
+    await fits(page);
+    await semester.selectOption('1');
+    await expect(summary).toContainText(/Зачтено|Отлично|Хорошо/);
+    await semester.selectOption('2');
+
+    const submitted = await post(page.request, '/requests', { type: 'Справка об обучении' });
+    expect(submitted.ok()).toBe(true);
+    const request = (await data('/cabinet')).requests[0];
+    const dean = await browser.newContext();
+    try {
+      const deanPage = await dean.newPage();
+      await login(deanPage, cabinet, 'dean');
+      const status = await post(deanPage.request, '/requests/' + request.id + '/status', { status: 'ready', note: '' });
+      expect(status.ok()).toBe(true);
+    } finally {
+      await dean.close();
+    }
+    await menu.click();
+    await page.locator('#view-menu').getByRole('link', { name: 'Справки и документы', exact: true }).click();
+    const ready = page.locator('#request-' + request.id);
+    await ready.locator('summary').click();
+    const downloadPromise = page.waitForEvent('download');
+    await ready.getByRole('link', { name: 'Скачать PDF' }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe('certificate-' + request.id + '.pdf');
+    if (width === 360) await download.saveAs('test-results/certificate-download.pdf');
+    await page.context().addInitScript(() => {
+      globalThis.print = () => { globalThis.document.documentElement.dataset.printRequested = 'true'; };
+    });
+    const [print] = await Promise.all([
+      page.waitForEvent('popup'),
+      ready.getByRole('link', { name: 'Печать', exact: true }).click(),
+    ]);
+    await expect(print.locator('html')).toHaveAttribute('data-print-requested', 'true');
+    await expect(print.getByRole('heading', { name: request.type })).toBeVisible();
+    await expect(print.locator('main')).toContainText('Демонстрационный документ. Не является официальной справкой');
+    await expect(print.locator('main')).toContainText('Нюша Мироновна Романова');
+    await expect(print.locator('nav, button, a, dialog')).toHaveCount(0);
+    await print.emulateMedia({ media: 'print' });
+    if (width === 360) {
+      await print.screenshot({ path: 'test-results/certificate-print.png' });
+      const printed = await print.pdf({ path: 'test-results/certificate-print.pdf', preferCSSPageSize: true });
+      expect(printed.toString('latin1')).toMatch(/MediaBox \[0 0 59[45]\.\d+ 84[12]\.\d+\]/);
+    }
+    await print.close();
+    await fits(page);
+  });
+}
+
 test('composer handles Enter and Shift+Enter; helper routes known and unknown queries', async ({ page, cabinet }) => {
   await login(page, cabinet);
   await page.locator('#header-inbox').click();

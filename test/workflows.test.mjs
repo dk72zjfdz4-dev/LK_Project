@@ -122,6 +122,16 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   assert.ok(initial.notifications.some(({ title }) => /отменено/i.test(title)));
   assert.ok(!(await cabinet(other)).notifications.some(({ title }) => /отменено/i.test(title)));
   const schedule = await expect('/schedule', student);
+  const registered = initial.contacts.find((contact) => Number.isSafeInteger(contact.teacherId));
+  assert.ok(registered);
+  assert.ok(schedule.lessons.some(({ contact }) => contact?.teacherId === registered.teacherId));
+  assert.ok(initial.contacts.some((contact) => contact.teacherId === null));
+  const startTeacherChat = '/dialogues/teacher/' + registered.teacherId;
+  const teacherChat = await expect(startTeacherChat, student, {});
+  assert.equal((await expect(startTeacherChat, student, {})).dialogueId, teacherChat.dialogueId);
+  assert.ok(initial.dialogues.some(({ id, fullName }) => id === teacherChat.dialogueId && fullName === registered.name));
+  await expect(startTeacherChat, dean, {}, 403);
+  await expect('/dialogues/teacher/999999', student, {}, 404);
   const cancellations = [...schedule.lessons, ...schedule.nextWeekLessons].filter(({ cancelled }) => cancelled);
   assert.equal(cancellations.length, 1);
   assert.equal((await expect('/lessons/' + cancellations[0].id, student)).lesson.cancelled, true);
@@ -136,13 +146,36 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   assert.ok(!(await cabinet(other)).requests.some(({ id }) => id === application.id));
   assert.ok(!(await cabinet(teacher)).requests.some(({ id }) => id === application.id));
   assert.ok((await cabinet(dean)).requests.some(({ id }) => id === application.id));
-  const status = '/requests/' + application.id + '/status';
+  const certificate = '/requests/' + application.id;
+  await expect(certificate + '/pdf', student, undefined, 404);
+  await expect(certificate + '/print', student, undefined, 404);
+  const status = certificate + '/status';
   await expect(status, other, { status: 'ready', note: 'Готово' }, 403);
   await expect(status, dean, { status: 'processing', note: 'Принято в работу' });
   await expect(status, dean, { status: 'ready', note: 'Справка готова' });
   const ready = (await cabinet(student)).requests.find(({ id }) => id === application.id);
   assert.equal(ready.status, 'ready');
   assert.ok(ready.history.length >= 3);
+  await expect(certificate + '/pdf', other, undefined, 404);
+  await expect(certificate + '/print', other, undefined, 404);
+  await expect(certificate + '/pdf', dean, undefined, 403);
+  await expect(certificate + '/pdf', null, undefined, 401);
+  const certificateResponse = await request(certificate + '/pdf', student);
+  assert.equal(certificateResponse.status, 200);
+  assert.equal(certificateResponse.headers.get('content-type'), 'application/pdf');
+  assert.match(certificateResponse.headers.get('content-disposition'), /^attachment;/);
+  assert.equal(certificateResponse.headers.get('cache-control'), 'no-store');
+  const pdfData = Buffer.from(await certificateResponse.arrayBuffer()).toString('latin1');
+  assert.match(pdfData, /^%PDF-/);
+  assert.match(pdfData, /MediaBox \[0 0 595\.28 841\.89\]/);
+  const print = await request(certificate + '/print', student);
+  assert.equal(print.status, 200);
+  assert.match(print.headers.get('content-type'), /^text\/html/);
+  assert.equal(print.headers.get('cache-control'), 'no-store');
+  const printHtml = await print.text();
+  assert.match(printHtml, /Демонстрационный документ. Не является официальной справкой/);
+  assert.match(printHtml, /Нюша Мироновна Романова/);
+  assert.match(printHtml, /Справка об обучении/);
   for (const item of documents.filter(({ title }) => title !== application.type)) {
     await expect('/requests', student, { type: item.title });
   }
@@ -192,6 +225,14 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
 
   const enrollment = (await cabinet(teacher)).grades.find((row) => /Нюша/.test(row.studentName));
   assert.ok(enrollment);
+  const originalGrade = initial.grades.find(({ subject, semester }) => subject === enrollment.subject && semester === enrollment.semester);
+  assert.ok(originalGrade);
+  const relatedWork = initial.assignments.filter(({ enrollmentId }) => enrollmentId === originalGrade.id);
+  assert.ok(relatedWork.length > 1);
+  assert.equal(originalGrade.points, originalGrade.courseworkPoints + relatedWork.reduce((sum, task) => (
+    sum + (task.submission?.status === 'reviewed' ? task.submission.points : 0)
+  ), 0));
+  assert.equal(originalGrade.maxPoints, originalGrade.courseworkMax + relatedWork.reduce((sum, task) => sum + task.maxPoints, 0));
   const unrelatedEnrollment = initial.grades.find((row) => row.id !== enrollment.id);
   const assignmentTitle = 'Контрольная работа для проверки';
   const dueAt = new Date(Date.now() + 7 * 86400000).toISOString();

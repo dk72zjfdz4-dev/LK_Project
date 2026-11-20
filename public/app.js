@@ -54,6 +54,7 @@ let cabinetLoad;
 let pollTimer;
 let selectedDay;
 let selectedHomeDay;
+let selectedGradeSemester;
 let selectedDialogue;
 let dialogueLoad;
 let lessonOpen;
@@ -162,6 +163,14 @@ function route(focusHeading = false) {
 
 function revealTarget() {
   if (!pendingTarget) return;
+  if (activeView === 'messages') {
+    const dialogue = cabinet?.dialogues.find(({ id }) => 'dialogue-' + id === pendingTarget);
+    if (!dialogue) return;
+    pendingTarget = undefined;
+    setNewDialogueMode(!dialogue.lastAt);
+    openDialogue(dialogue, byId('page-heading').classList.contains('pointer-navigation'));
+    return;
+  }
   const target = byId(pendingTarget);
   if (!target || !byId('view-' + activeView).contains(target)) return;
   pendingTarget = undefined;
@@ -182,6 +191,7 @@ function preservePagePosition(update) {
 function showLogin(message = '', focusHeading = false) {
   profile = undefined;
   activeView = schedule = scheduleLoad = cabinet = cabinetLoad = selectedDay = selectedHomeDay = selectedDialogue = dialogueLoad = lessonOpen = undefined;
+  selectedGradeSemester = undefined;
   window.clearInterval(pollTimer);
   renders.clear();
   messageStates.clear();
@@ -343,7 +353,8 @@ async function openLesson(id) {
     if (!dialog.open || lessonOpen !== load || profile !== load.account) return;
     byId('lesson-dialog-heading').textContent = lesson.title;
     content.replaceChildren(element('p', 'muted', dateFormat.format(dateAt(lesson.date)) + ' · ' + lessonTimes(lesson)), lessonDetails(lesson));
-    if (lesson.contact) content.append(contactCard(lesson.contact));
+    if (lesson.contact) content.append(contactCard(lesson.contact, { canMessage: true }));
+    else content.append(element('p', 'muted', 'Контакты преподавателя пока недоступны.'));
     if (lesson.change || lesson.cancelled) content.append(element('p', 'change-label', lesson.change || 'Занятие отменено.'));
   } catch (error) {
     if (profile !== load.account || lessonOpen !== load) return;
@@ -644,6 +655,7 @@ async function loadCabinet({ quiet = false, fresh = false, refreshView, afterRen
     else update();
     revealTarget();
     afterRender?.();
+    return payload;
   } catch (error) {
     if (profile !== account || cabinetLoad !== load || endSession(error)) return;
     if (!quiet || !cabinet) showCabinetStatus(error.message, true);
@@ -657,7 +669,13 @@ function renderCabinet(force = false) {
   if (!cabinet) return;
   switch (activeView) {
     case 'grades':
-      renderSection('grades-content', cabinet.grades, renderGrades, force);
+      if (profile.role === 'student') {
+        const targetGrade = cabinet.grades.find(({ id }) => 'grade-' + id === pendingTarget);
+        if (targetGrade) selectedGradeSemester = targetGrade.semester;
+        renderSection('grades-content', [cabinet.grades, cabinet.assignments, cabinet.appeals, selectedGradeSemester], renderStudentGrades, force);
+      } else {
+        renderSection('grades-content', cabinet.grades, renderGrades, force);
+      }
       break;
     case 'assignments':
       renderSection('assignments-content', [cabinet.grades, cabinet.assignments, cabinet.appeals], renderAssignments, force);
@@ -834,30 +852,118 @@ function renderGrades(grades) {
   const semesters = [...new Set(grades.map((item) => item.semester))].sort((a, b) => b - a);
   return semesters.map((semester) => panel(semester + ' семестр', listFor(
     grades.filter((item) => item.semester === semester),
-    (item) => {
-      const detail = element('details', 'record-details grade');
-      detail.id = 'grade-' + item.id;
-      const summary = element('summary', 'record-summary');
-      summary.id = detail.id + '-summary';
-      const labels = element('span', 'record-labels');
-      labels.append(element('strong', '', item.subject));
-      if (profile.role === 'teacher') labels.append(element('span', 'muted', item.studentName));
-      const score = element('span', 'grade-score', pointsFormat.format(item.points) + ' / ' + pointsFormat.format(item.maxPoints));
-      summary.append(labels, score);
-      detail.append(summary);
-      const progress = element('progress', 'grade-progress');
-      progress.max = item.maxPoints;
-      progress.value = item.points;
-      progress.setAttribute('aria-label', 'Баллы по дисциплине «' + item.subject + '»');
-      detail.append(progress, metadata([
-        ['Форма контроля', item.control],
-        ['Итог контроля', item.result || 'Пока не зафиксирован'],
-        ['Критерии', item.criteria],
-      ]));
-      return detail;
-    },
-    '',
+    gradeDetails,
+    'Оценок пока нет.',
   )));
+}
+
+function gradeScore(points, maximum) {
+  return pointsFormat.format(points) + ' / ' + pointsFormat.format(maximum);
+}
+
+function gradeDetails(item) {
+  const student = profile.role === 'student';
+  const detail = element('details', 'record-details grade');
+  detail.id = 'grade-' + item.id;
+  const summary = element('summary', 'record-summary');
+  summary.id = detail.id + '-summary';
+  const labels = element('span', 'record-labels');
+  labels.append(element('strong', '', item.subject));
+  if (student) {
+    labels.append(element('span', 'muted grade-summary-control', item.control + ' · ' + (item.result || 'Итог пока не зафиксирован')));
+  } else {
+    labels.append(element('span', 'muted', item.studentName));
+  }
+  const score = element('span', 'grade-score', gradeScore(item.points, item.maxPoints));
+  summary.append(labels, score);
+  const progress = element('progress', 'grade-progress');
+  progress.max = item.maxPoints;
+  progress.value = item.points;
+  progress.setAttribute('aria-label', 'Баллы по дисциплине «' + item.subject + '»');
+  detail.append(summary, progress, metadata([
+    ['Текущие баллы', student ? pointsFormat.format(item.points) : null],
+    ['Максимум баллов', student ? pointsFormat.format(item.maxPoints) : null],
+    ['Форма контроля', item.control],
+    ['Итог контроля', item.result || 'Пока не зафиксирован'],
+    ['Критерии', item.criteria],
+  ]));
+  return detail;
+}
+
+function renderStudentGrades([grades, assignments, appeals, selected]) {
+  if (!grades.length) return [panel('Оценки', element('p', 'empty-state', 'Оценок пока нет.'))];
+  const semesters = [...new Set(grades.map((item) => item.semester))].sort((a, b) => b - a);
+  const semester = semesters.includes(selected) ? selected : semesters[0];
+  const controls = element('div', 'grade-filters');
+  const select = element('select');
+  select.id = 'grade-semester';
+  select.setAttribute('aria-controls', 'grade-semester-results');
+  const label = element('label', '', 'Семестр');
+  label.htmlFor = select.id;
+  for (const number of semesters) {
+    const option = element('option', '', number + ' семестр');
+    option.value = number;
+    select.append(option);
+  }
+  select.value = semester;
+  select.addEventListener('change', () => {
+    selectedGradeSemester = Number(select.value);
+    renderCabinet();
+  });
+  controls.append(label, select);
+  const appealsBySubmission = new Map(appeals.map((item) => [item.submissionId, item]));
+  const results = listFor(grades.filter((item) => item.semester === semester), (item) => {
+    const detail = gradeDetails(item);
+    const related = assignments.filter((assignment) => assignment.enrollmentId === item.id);
+    detail.append(studentGradeBreakdown(item, related, appealsBySubmission));
+    return detail;
+  }, 'Оценок пока нет.');
+  results.id = 'grade-semester-results';
+  const section = element('section', 'panel');
+  section.setAttribute('aria-label', 'Оценки по дисциплинам');
+  section.append(controls, results);
+  return [section];
+}
+
+function studentGradeBreakdown(grade, assignments, appealsBySubmission) {
+  const content = document.createDocumentFragment();
+  content.append(element('h3', 'record-subheading', 'Из чего складываются баллы'), metadata([
+    ['Ранее учтённые баллы без детализации', gradeScore(grade.courseworkPoints, grade.courseworkMax)],
+  ]));
+  if (assignments.length) {
+    content.append(listFor(assignments, (item) => {
+      const row = element('div', 'record-line');
+      const info = element('div');
+      const assignment = anchor('#assignments/assignment-' + item.id, 'inline-link', item.title);
+      assignment.id = 'grade-assignment-' + item.id;
+      info.append(assignment);
+      const appeal = appealsBySubmission.get(item.submission?.id);
+      if (appeal) {
+        const link = anchor('#assignments/appeal-' + appeal.id, 'inline-link', 'Пересмотр оценки');
+        link.id = 'grade-appeal-' + appeal.id;
+        info.append(element('br'), link);
+      }
+      const score = item.submission?.status === 'reviewed'
+        ? element('span', 'grade-score', gradeScore(item.submission.points, item.maxPoints))
+        : statusBadge('Не оценено · максимум ' + pointsFormat.format(item.maxPoints), 'submitted');
+      row.append(info, score);
+      return row;
+    }, ''));
+  }
+  const unfinished = assignments.filter((item) => !item.submission).sort((a, b) => a.dueAt.localeCompare(b.dueAt));
+  const now = Date.now();
+  const upcoming = unfinished.find((item) => new Date(item.dueAt).getTime() >= now);
+  const next = upcoming ?? unfinished.at(-1);
+  if (next) {
+    const deadline = element('time', 'deadline-date', eventTime(next.dueAt));
+    deadline.dateTime = next.dueAt;
+    const link = anchor('#assignments/assignment-' + next.id, 'inline-link', next.title);
+    link.id = 'grade-next-assignment-' + next.id;
+    const row = element('p', 'record-line');
+    row.append(link, deadline);
+    content.append(element('h3', 'record-subheading', upcoming ? 'Ближайшее задание к сдаче' : 'Просроченное задание к сдаче'), row);
+  }
+  return content;
 }
 
 function metadata(entries) {
@@ -873,14 +979,14 @@ function statusBadge(text, status) {
   return element('span', 'status-badge status-' + status, text);
 }
 
-function contactCard(contact, withId = false) {
+function contactCard(contact, { withId = false, canMessage = false } = {}) {
   const card = element('article', 'contact-card');
   if (withId) card.id = 'contact-' + contact.id;
   const name = element('h3', 'lesson-title', contact.name);
   name.tabIndex = -1;
   const address = element('p', 'contact-address', contact.email);
   const actions = element('div', 'contact-actions');
-  const copy = element('button', 'button button-secondary', 'Скопировать');
+  const copy = element('button', 'button button-secondary', 'Скопировать почту');
   copy.type = 'button';
   copy.setAttribute('aria-label', 'Скопировать почту ' + contact.name);
   const status = element('p', 'muted');
@@ -893,14 +999,55 @@ function contactCard(contact, withId = false) {
       status.textContent = 'Выделите и скопируйте адрес вручную.';
     }
   });
-  const mail = anchor('mailto:' + contact.email, 'inline-link', 'Написать письмо');
+  const mail = anchor('mailto:' + contact.email, 'inline-link', 'Открыть почту');
+  const studentMessaging = canMessage && profile.role === 'student';
+  const errorOutput = element('p', 'local-error');
+  errorOutput.setAttribute('role', 'alert');
+  if (studentMessaging && contact.teacherId) {
+    const write = element('button', 'button button-secondary', 'Написать');
+    write.type = 'button';
+    write.addEventListener('click', (event) => openTeacherDialogue(contact.teacherId, write, errorOutput, event));
+    actions.append(write);
+  }
   actions.append(copy, mail);
-  card.append(name, element('p', 'muted', 'Демо-адрес'), address, actions, status);
+  card.append(name, element('p', 'muted', 'Демо-адрес'), address, actions, status, errorOutput);
+  if (studentMessaging && !contact.teacherId) {
+    card.append(element('p', 'muted', 'Для этого преподавателя переписка в кабинете недоступна. Можно открыть почту.'));
+  }
   return card;
 }
 
+async function openTeacherDialogue(teacherId, button, errorOutput, event) {
+  const account = profile;
+  if (!account || signingOut || button.disabled) return;
+  const origin = window.location.hash;
+  const dialog = button.closest('dialog');
+  const lesson = lessonOpen;
+  const current = () => profile === account && window.location.hash === origin && (!dialog || (dialog.open && lessonOpen === lesson));
+  button.disabled = true;
+  errorOutput.textContent = '';
+  try {
+    const { dialogueId } = await post(resource('/api/dialogues/teacher', teacherId), {});
+    if (!current()) return;
+    const updated = await loadCabinet({ quiet: true, fresh: true });
+    if (!current()) return;
+    if (!updated?.dialogues.some(({ id }) => id === dialogueId)) {
+      throw new Error('Не удалось загрузить диалог. Попробуйте ещё раз.');
+    }
+    dialog?.close();
+    navigateFromLink('#messages/dialogue-' + dialogueId, event);
+  } catch (error) {
+    if (current() && !endSession(error)) {
+      (errorOutput.isConnected ? errorOutput : byId('app-error')).textContent = error.message;
+    }
+  } finally {
+    button.disabled = false;
+    if (current() && button.isConnected && document.activeElement === document.body) button.focus({ preventScroll: true });
+  }
+}
+
 function renderContacts(contacts) {
-  return [panel('Преподаватели', listFor(contacts, (contact) => contactCard(contact, true), 'Доступных контактов пока нет.'))];
+  return [panel('Преподаватели', listFor(contacts, (contact) => contactCard(contact, { withId: true, canMessage: true }), 'Доступных контактов пока нет.'))];
 }
 
 function renderDialogueContact(item) {
@@ -1010,7 +1157,20 @@ function renderRequests(requests) {
     const labels = element('span', 'record-labels');
     labels.append(element('strong', '', item.type), element('span', 'muted', [!student && item.studentName, eventTime(item.createdAt)].filter(Boolean).join(' · ')));
     summary.append(labels, statusBadge(requestStatuses[item.status] || item.status, item.status));
-    detail.append(summary, element('h3', 'record-subheading', 'История заявки'), listFor(item.history, (event) => {
+    detail.append(summary);
+    if (student && item.status === 'ready') {
+      const actions = element('div', 'request-document-actions');
+      const download = anchor(resource('/api/requests', item.id, '/pdf'), 'inline-link', 'Скачать PDF');
+      download.id = detail.id + '-pdf';
+      download.download = '';
+      const print = anchor(resource('/api/requests', item.id, '/print'), 'inline-link', 'Печать');
+      print.id = detail.id + '-print';
+      print.target = '_blank';
+      print.rel = 'noopener';
+      actions.append(download, print);
+      detail.append(actions);
+    }
+    detail.append(element('h3', 'record-subheading', 'История заявки'), listFor(item.history, (event) => {
       const entry = element('div');
       entry.append(element('strong', '', requestStatuses[event.status] || event.status), element('p', 'muted', eventTime(event.createdAt)));
       if (event.note) entry.append(element('p', 'record-copy', event.note));
@@ -1587,6 +1747,10 @@ function openDialogue(item, pointer) {
 
 function closeDialogue() {
   const id = selectedDialogue;
+  if (activeView === 'messages' && window.location.hash.startsWith('#messages/dialogue-')) {
+    pageHash = '#messages';
+    history.replaceState(null, '', pageHash);
+  }
   selectedDialogue = undefined;
   dialogueLoad = undefined;
   receivedMessages = [];

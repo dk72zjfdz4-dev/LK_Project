@@ -6,7 +6,7 @@ import { basename, dirname, relative, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { createCabinet, demoContact, installCabinet, seedCabinet } from './cabinet.mjs';
+import { createCabinet, installCabinet, seedCabinet } from './cabinet.mjs';
 
 const root = realpathSync(fileURLToPath(new URL('.', import.meta.url)));
 const publicDirectory = realpathSync(resolve(root, 'public'));
@@ -94,6 +94,8 @@ const staticFiles = new Map([
   ['/styles.css', ['styles.css', 'text/css']],
   ['/desktop-tablet.css', ['desktop-tablet.css', 'text/css']],
   ['/mobile.css', ['mobile.css', 'text/css']],
+  ['/certificate-print.css', ['certificate-print.css', 'text/css']],
+  ['/certificate-print.js', ['certificate-print.js', 'text/javascript']],
 ]);
 
 function isPublicPath(path) {
@@ -262,7 +264,7 @@ function lessonOn(row, date, cancellation) {
     start: row.start_time, end: row.end_time,
     title: row.title, room: row.room, teacher: row.teacher,
     change: cancellation ?? row.change, cancelled: Boolean(cancellation),
-    contact: demoContact(row.teacher),
+    contact: cabinet.lessonContact(row.student_id, row),
   };
 }
 
