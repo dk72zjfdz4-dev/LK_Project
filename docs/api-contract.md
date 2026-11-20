@@ -22,9 +22,10 @@
 |---|---|
 | POST /api/requests | `{type}` |
 | POST /api/requests/:id/status | `{status,note}`, статус `processing,ready,rejected` |
-| GET /api/dialogues/:id | `{messages}`, сообщения `{id,mine,sender,text,createdAt,read}`. Для отправленных `read` означает прочтение собеседником |
-| POST /api/dialogues/:id/read | `{throughId}` отмечает сообщения до указанного включительно, `{}` — весь диалог |
-| POST /api/dialogues/:id/messages | `{text}` |
+| GET /api/dialogues/:id | `{messages}` без изменения статусов. Сообщение содержит `id,mine,sender,text,createdAt,delivered,read` и `clientId` для собственной отправки при наличии |
+| POST /api/dialogues/:id/delivered | `{messageIds:[…]}` подтверждает получение выбранных входящих сообщений клиентом |
+| POST /api/dialogues/:id/read | `{messageIds:[…]}` отмечает выбранные входящие сообщения как прочитанные и доставленные |
+| POST /api/dialogues/:id/messages | `{text,clientId?}` → `{ok:true,message}`. Повтор с тем же ключом и текстом возвращает то же сообщение. Повтор ключа с другим текстом → 409 |
 | POST /api/assignments | `{enrollmentId,title,description,dueAt,maxPoints}` |
 | POST /api/assignments/:id/submission | Сырые байты, Content-Type PDF/DOCX, URI-кодированное имя в `X-Filename` |
 | GET /api/submissions/:id/file | Защищённое скачивание |
@@ -41,6 +42,12 @@
 - Уведомление `{id,title,text,createdAt}`.
 
 POST в таблице данных кабинета и POST для избранного отвечают JSON `{ok:true}`. Все POST требуют тот же origin. Для входа и выхода действуют ответы из первой таблицы. Чужой идентификатор возвращает 404, запрет роли 403. Все даты событий ISO, дедлайн принимает дату или ISO.
+
+## Переписка
+
+- Все операции с диалогом ограничены его участниками. Подтверждения принимают только идентификаторы входящих сообщений текущего диалога и возвращают `{ok:true}`. Свои, чужие и отсутствующие сообщения дают 404, весь ошибочный пакет отменяется. Статусы сохраняются и не понижаются. Сервер проверяет участника, видимость сообщения определяет клиент.
+- `clientId` — непустая строка до 128 символов. Ключ уникален в пределах диалога и отправителя. Стороннему участнику ключ не выдаётся. Для идемпотентного повтора клиент отправляет первоначальные ключ и текст.
+- Элемент `cabinet.dialogues` содержит `id,title,fullName,roleLabel,lastText,lastMine,lastAt,unreadCount,contact`. Диалоги сортируются по последней активности. Пустые разрешённые диалоги имеют `null` в полях последней реплики и показываются среди контактов для начала переписки.
 
 ## Удобство кабинета
 

@@ -74,6 +74,22 @@
   }
 
   .mobile-avatar { flex: 0 0 44px; text-decoration: none; }
+  .mobile-header .brand-mark { width: 36px; height: 36px; }
+
+  .messaging {
+    grid-template-columns: minmax(0, 1fr);
+    height: max(230px, calc(var(--messenger-viewport-height, 100dvh) - var(--mobile-tabs-height) - 8rem - env(safe-area-inset-top)));
+  }
+
+  .messaging:not(.has-dialogue) .conversation,
+  .messaging.has-dialogue .dialogue-panel {
+    display: none;
+  }
+
+  .messaging .dialogue-list { padding-block-end: 52px; }
+  .messaging .conversation-title .dialogue-back { display: inline-flex; }
+  .messaging .dialogue-avatar { width: 34px; height: 34px; }
+  .messaging .dialogue-contact summary { padding-inline: 4px; }
 
   .mobile-menu-page {
     display: grid;

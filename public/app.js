@@ -185,6 +185,18 @@ function showLogin(message = '', focusHeading = false) {
   window.clearInterval(pollTimer);
   renders.clear();
   messageStates.clear();
+  receiptSync = undefined;
+  receivedMessages = [];
+  newDialogueMode = false;
+  dialogueListScroll = 0;
+  dialogueListQuery = '';
+  closeDialogue();
+  byId('dialogue-search').value = '';
+  byId('dialogue-filter').selectedIndex = 0;
+  byId('dialogues-content').replaceChildren();
+  byId('messages-content').scrollTop = 0;
+  messageText.value = '';
+  byId('message-error').textContent = '';
   renderedMessages.clear();
   pendingTarget = undefined;
   menuScroll = 0;
@@ -655,8 +667,8 @@ function renderCabinet(force = false) {
       break;
     case 'messages':
       byId('messaging').hidden = false;
-      renderSection('dialogues-content', cabinet.dialogues, renderDialogues, force);
-      renderDialogueContact(cabinet.dialogues.find((item) => item.id === selectedDialogue)?.contact);
+      refreshDialogueList();
+      renderDialogueContact(cabinet.dialogues.find((item) => item.id === selectedDialogue));
       break;
     case 'contacts':
       renderSection('contacts-content', cabinet.contacts ?? [], renderContacts, force);
@@ -891,10 +903,15 @@ function renderContacts(contacts) {
   return [panel('Преподаватели', listFor(contacts, (contact) => contactCard(contact, true), 'Доступных контактов пока нет.'))];
 }
 
-function renderDialogueContact(contact) {
-  const signature = JSON.stringify(contact ?? null);
+function renderDialogueContact(item) {
+  const signature = JSON.stringify([item?.fullName, item?.contact]);
   if (renders.get('dialogue-contact') === signature) return;
-  byId('dialogue-contact').replaceChildren(...(contact ? [contactCard(contact)] : []));
+  const content = byId('dialogue-contact');
+  content.replaceChildren();
+  if (item) {
+    content.append(element('p', 'record-copy', item.fullName ?? item.title));
+    if (item.contact) content.append(contactCard(item.contact));
+  }
   renders.set('dialogue-contact', signature);
 }
 
@@ -1451,39 +1468,113 @@ function renderAppeal(item, assignment, student) {
   return detail;
 }
 
+let newDialogueMode = false;
+let dialogueListScroll = 0;
+let dialogueListQuery = '';
+let receivedMessages = [];
+let receiptSync;
+
+const shortMessageTime = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', hour: '2-digit', minute: '2-digit' });
+const dialogueDate = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'short' });
+const messageDay = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', dateStyle: 'long' });
+
+function dialogueName(item) {
+  const parts = item.title.split(/\s+/);
+  return parts.length < 3 ? item.title : parts[0] + ' ' + parts.at(-1);
+}
+
+function dialogueInitials(item) {
+  return dialogueName(item).split(/\s+/).map((part) => part[0]).join('');
+}
+
+function refreshDialogueList() {
+  if (!cabinet) return;
+  const list = byId('dialogues-content');
+  const position = list.scrollTop;
+  renderSection('dialogues-content', [cabinet.dialogues, selectedDialogue, newDialogueMode,
+    byId('dialogue-search').value, byId('dialogue-filter').value], () => renderDialogues(cabinet.dialogues));
+  list.scrollTop = position;
+  byId('dialogue-new').setAttribute('aria-pressed', String(newDialogueMode));
+  byId('dialogues-heading').textContent = newDialogueMode ? 'Новая переписка' : 'Диалоги';
+  byId('dialogue-search').placeholder = newDialogueMode ? 'Поиск контактов' : 'Поиск диалогов';
+  byId('dialogue-filter').hidden = newDialogueMode;
+}
+
+function setNewDialogueMode(open) {
+  if (newDialogueMode === open) return;
+  const search = byId('dialogue-search');
+  if (open) dialogueListQuery = search.value;
+  search.value = open ? '' : dialogueListQuery;
+  newDialogueMode = open;
+  dialogueListScroll = 0;
+  refreshDialogueList();
+}
+
 function renderDialogues(dialogues) {
-  if (!dialogues.length) return [element('p', 'empty-state', 'Диалогов пока нет.')];
-  return dialogues.map((item) => {
+  const query = byId('dialogue-search').value.trim().toLocaleLowerCase('ru');
+  const filtered = dialogues.filter((item) => Boolean(!item.lastAt) === newDialogueMode
+    && (newDialogueMode || byId('dialogue-filter').value !== 'unread' || item.unreadCount)
+    && [dialogueName(item), item.fullName, item.roleLabel, item.lastText].some((value) => value?.toLocaleLowerCase('ru').includes(query)));
+  if (!filtered.length) return [element('p', 'empty-state', query ? 'Ничего не найдено.' : newDialogueMode ? 'Новых контактов пока нет.' : 'Диалогов пока нет.')];
+  return filtered.map((item) => {
     const button = element('button', 'dialogue-button');
     button.type = 'button';
     button.id = 'dialogue-' + item.id;
     button.setAttribute('aria-pressed', String(selectedDialogue === item.id));
-    button.append(element('span', '', item.title));
+    const avatar = element('span', 'dialogue-avatar', dialogueInitials({ title: item.fullName ?? item.title }));
+    avatar.setAttribute('aria-hidden', 'true');
+    const summary = element('span', 'dialogue-summary');
+    summary.append(element('strong', 'dialogue-name', dialogueName(item)), element('span', 'dialogue-role', item.roleLabel));
+    if (item.lastText) summary.append(element('span', 'dialogue-preview', (item.lastMine ? 'Вы: ' : '') + item.lastText));
+    const meta = element('span', 'dialogue-meta');
+    if (item.lastAt) {
+      const date = new Date(item.lastAt);
+      const time = element('time', '', messageDay.format(date) === messageDay.format(new Date())
+        ? shortMessageTime.format(date) : dialogueDate.format(date));
+      time.dateTime = item.lastAt;
+      meta.append(time);
+    }
+    button.append(avatar, summary, meta);
     if (item.unreadCount) {
       const badge = element('span', 'count-badge', item.unreadCount);
       badge.setAttribute('aria-label', 'Непрочитанных сообщений: ' + item.unreadCount);
-      button.append(badge);
+      meta.append(badge);
     }
-    button.addEventListener('click', () => openDialogue(item));
+    button.addEventListener('click', (event) => openDialogue(item, event.detail > 0));
     return button;
   });
 }
 
-function openDialogue(item) {
+function openDialogue(item, pointer) {
+  const list = byId('dialogues-content');
+  if (list.getClientRects().length) dialogueListScroll = list.scrollTop;
+  const heading = byId('dialogue-heading');
+  heading.classList.toggle('pointer-navigation', pointer);
+  if (helpDialog.open) {
+    helpNavigationClose = true;
+    helpDialog.close();
+  }
   if (selectedDialogue === item.id) {
     byId('dialogue-heading').focus();
     refreshDialogue();
     return;
   }
   selectedDialogue = item.id;
-  const list = byId('dialogues-content');
+  receivedMessages = [];
+  byId('messaging').classList.add('has-dialogue');
+  byId('messages-new').hidden = true;
+  byId('dialogue-avatar').textContent = dialogueInitials({ title: item.fullName ?? item.title });
+  byId('dialogue-info')?.removeAttribute('open');
+  byId('dialogue-role').textContent = item.roleLabel;
   for (const button of list.querySelectorAll('button')) {
     button.setAttribute('aria-pressed', String(button.id === 'dialogue-' + item.id));
   }
-  byId('dialogue-heading').textContent = item.title;
+  byId('dialogue-heading').textContent = dialogueName(item);
+  byId('dialogue-heading').title = item.fullName ?? item.title;
   byId('dialogue-heading').focus();
   byId('dialogue-error').textContent = '';
-  renderDialogueContact(item.contact);
+  renderDialogueContact(item);
+  sizeMessaging();
   composingMessage = false;
   syncComposer();
   setEmojiPanel(false);
@@ -1494,47 +1585,141 @@ function openDialogue(item) {
   refreshDialogue(false, true);
 }
 
+function closeDialogue() {
+  const id = selectedDialogue;
+  selectedDialogue = undefined;
+  dialogueLoad = undefined;
+  receivedMessages = [];
+  byId('messaging').classList.remove('has-dialogue');
+  byId('dialogue-heading').textContent = 'Переписка';
+  byId('dialogue-heading').removeAttribute('title');
+  for (const field of ['dialogue-avatar', 'dialogue-role', 'dialogue-error']) byId(field).textContent = '';
+  renderDialogueContact();
+  byId('messages-new').hidden = true;
+  messageForm.hidden = true;
+  setEmojiPanel(false);
+  byId('messages-content').replaceChildren(element('p', 'empty-state', 'Выберите диалог.'));
+  refreshDialogueList();
+  byId('dialogues-content').scrollTop = dialogueListScroll;
+  if (id !== undefined) (byId('dialogue-' + id) ?? byId('dialogue-search')).focus({ preventScroll: true });
+}
+
 function renderDialogueMessages(messages, content) {
-  if (!messages.length) {
-    content.replaceChildren(element('p', 'empty-state', 'В этом диалоге ещё нет сообщений.'));
-    renderedMessages.clear();
-    return;
-  }
-  let list = content.firstElementChild;
-  if (list?.tagName !== 'UL') {
+  let list = content.querySelector('ul');
+  if (!list) {
     list = element('ul', 'record-list');
     content.replaceChildren(list);
   }
-  let next = list.firstElementChild;
+  list.querySelector('.message-pending')?.remove();
+  let lastDay = list.lastElementChild?.dataset.day;
   for (const item of messages) {
     let entry = renderedMessages.get(item.id);
     if (!entry) {
+      const time = new Date(item.createdAt);
+      const day = messageDay.format(time);
+      if (lastDay !== day) list.append(element('li', 'message-day', day));
+      lastDay = day;
       const row = element('li', 'record-row');
+      row.dataset.day = day;
       const message = element('article', 'message ' + (item.mine ? 'message-mine' : 'message-other'));
       const label = element('div', 'message-label');
-      const sentAt = element('time', 'muted', eventTime(item.createdAt));
+      const sentAt = element('time', 'muted', shortMessageTime.format(time));
       sentAt.dateTime = item.createdAt;
-      label.append(element('strong', '', item.sender), sentAt);
-      message.append(label, element('p', 'record-copy', item.text));
-      const receipt = item.mine ? element('p', 'message-receipt muted') : null;
-      if (receipt) message.append(receipt);
+      const receipt = item.mine ? element('span', 'message-receipt') : null;
+      label.append(sentAt);
+      if (receipt) label.append(receipt);
+      message.append(element('p', 'record-copy', item.text), label);
       row.append(message);
       entry = { row, receipt };
       renderedMessages.set(item.id, entry);
       row.dataset.messageId = item.id;
+      list.append(row);
     }
-    if (entry.receipt && entry.read !== item.read) {
-      entry.receipt.textContent = item.read ? 'Прочитано' : 'Отправлено';
-      entry.read = item.read;
+    if (entry.receipt) {
+      const label = item.read ? 'Прочитано' : item.delivered ? 'Доставлено' : 'Сохранено на сервере';
+      entry.receipt.textContent = item.read || item.delivered ? '✓✓' : '✓';
+      entry.receipt.title = label;
+      entry.receipt.setAttribute('aria-label', label);
+      entry.receipt.setAttribute('role', 'img');
+      entry.receipt.classList.toggle('receipt-read', item.read);
     }
-    if (entry.row !== next) list.insertBefore(entry.row, next);
-    next = entry.row.nextElementSibling;
   }
-  while (next) {
-    const stale = next;
-    next = next.nextElementSibling;
-    renderedMessages.delete(Number(stale.dataset.messageId));
-    stale.remove();
+  const state = messageStates.get(selectedDialogue);
+  if (state?.outgoing) {
+    const saved = messages.some(({ clientId }) => clientId === state.outgoing.clientId);
+    const row = element('li', 'record-row message-pending');
+    const message = element('article', 'message message-mine');
+    const status = state.sending ? 'Отправляется' : 'Отправка не подтверждена';
+    const receipt = element('span', 'message-receipt', state.sending ? '◷' : '⚠');
+    receipt.setAttribute('role', 'img');
+    receipt.setAttribute('aria-label', status);
+    receipt.title = status;
+    if (!saved) message.append(element('p', 'record-copy', state.outgoing.text));
+    message.append(receipt);
+    if (!state.sending) {
+      const retry = element('button', 'button button-secondary', 'Повторить');
+      retry.type = 'button';
+      retry.addEventListener('click', () => sendMessage(undefined, true));
+      message.append(retry);
+    }
+    row.append(message);
+    list.append(row);
+  }
+  if (!list.children.length) list.append(element('li', 'empty-state', 'В этом диалоге ещё нет сообщений.'));
+  else if (list.children.length > 1) list.querySelector('.empty-state')?.remove();
+}
+
+function atConversationEnd(content) {
+  return content.scrollHeight - content.clientHeight - content.scrollTop <= 48;
+}
+
+function scrollConversationEnd() {
+  const content = byId('messages-content');
+  content.scrollTop = content.scrollHeight;
+  byId('messages-new').hidden = true;
+}
+
+function messageIsVisible(bubble, pane) {
+  const bounds = bubble.getBoundingClientRect();
+  const viewport = window.visualViewport;
+  const top = Math.max(bounds.top, pane.top, viewport?.offsetTop ?? 0);
+  const bottom = Math.min(bounds.bottom, pane.bottom, viewport ? viewport.offsetTop + viewport.height : window.innerHeight);
+  if (bottom - top < Math.min(16, bounds.height) || !bounds.width || !bounds.height) return false;
+  const x = bounds.left + bounds.width / 2;
+  return [top + 1, (top + bottom) / 2, bottom - 1].some((y) => bubble.contains(document.elementFromPoint(x, y)));
+}
+
+async function acknowledgeMessages() {
+  const account = profile;
+  const id = selectedDialogue;
+  if (!account || id === undefined || activeView !== 'messages' || receiptSync) return;
+  const visible = document.visibilityState === 'visible';
+  const pane = byId('messages-content').getBoundingClientRect();
+  const read = [];
+  const delivered = [];
+  for (const item of receivedMessages) {
+    if (item.mine || item.read) continue;
+    if (!item.delivered) delivered.push(item);
+    const bubble = renderedMessages.get(item.id)?.row.firstElementChild;
+    if (visible && bubble && messageIsVisible(bubble, pane)) read.push(item);
+  }
+  if (!delivered.length && !read.length) return;
+  const sync = {};
+  receiptSync = sync;
+  try {
+    for (const [status, items] of [['delivered', delivered], ['read', read]]) {
+      for (let index = 0; index < items.length; index += 100) {
+        if (profile !== account || selectedDialogue !== id || activeView !== 'messages') return;
+        const batch = items.slice(index, index + 100);
+        await post(resource('/api/dialogues', id, '/' + status), { messageIds: batch.map(({ id }) => id) });
+        for (const item of batch) item[status] = true;
+      }
+    }
+    if (read.length && profile === account) loadCabinet({ quiet: true, fresh: true });
+  } catch (error) {
+    if (profile === account) endSession(error);
+  } finally {
+    if (receiptSync === sync) receiptSync = undefined;
   }
 }
 
@@ -1550,28 +1735,19 @@ async function refreshDialogue(quiet = false, fresh = false) {
     if (!current()) return;
     const signature = JSON.stringify(messages);
     const content = byId('messages-content');
-    const latestId = messages.at(-1)?.id;
-    const hasNewMessages = renders.has('messages') && latestId !== undefined && !renderedMessages.has(latestId);
-    let atEnd = false;
-    if (hasNewMessages) {
-      const bounds = content.getBoundingClientRect();
-      atEnd = bounds.top < window.innerHeight && bounds.bottom <= window.innerHeight + 48;
-    }
-    const state = messageStates.get(id);
-    if (renders.get('messages') !== signature) {
+    const first = !renders.has('messages');
+    const atEnd = atConversationEnd(content);
+    const hasNew = messages.some(({ id }) => !renderedMessages.has(id));
+    receivedMessages = messages;
+    if (first || renders.get('messages') !== signature) {
       renderDialogueMessages(messages, content);
       renders.set('messages', signature);
     }
-    if (state?.scrollOnRefresh || (atEnd && hasNewMessages)) {
-      if (state) state.scrollOnRefresh = false;
-      messageForm.scrollIntoView({ block: 'nearest' });
-    }
+    if (first || (atEnd && hasNew)) scrollConversationEnd();
+    else if (hasNew) byId('messages-new').hidden = false;
     const errorOutput = byId('dialogue-error');
     if (errorOutput.textContent) errorOutput.textContent = '';
-    if (messages.some((message) => !message.mine && !message.read)) {
-      await post(resource('/api/dialogues', id, '/read'), { throughId: messages.at(-1).id });
-      if (current()) loadCabinet({ quiet: true, fresh: true });
-    }
+    void acknowledgeMessages();
   } catch (error) {
     if (current() && !endSession(error) && !quiet) byId('dialogue-error').textContent = error.message;
   } finally {
@@ -1599,8 +1775,9 @@ function syncComposer() {
   const value = state?.text ?? '';
   if (messageText.value !== value) messageText.value = value;
   const button = byId('message-submit');
-  button.disabled = Boolean(state?.sending);
-  button.textContent = state?.sending ? 'Отправляем…' : state?.error ? 'Повторить отправку' : 'Отправить';
+  button.disabled = Boolean(state?.outgoing) || !value.trim();
+  messageText.style.height = 'auto';
+  messageText.style.height = Math.min(120, messageText.scrollHeight) + 'px';
   byId('message-error').textContent = state?.error ?? '';
   if (state?.sending) messageForm.setAttribute('aria-busy', 'true');
   else messageForm.removeAttribute('aria-busy');
@@ -1609,48 +1786,60 @@ function syncComposer() {
 function updateDraft() {
   const state = messageStates.get(selectedDialogue) ?? {};
   state.text = messageText.value;
-  if (state.error) {
-    state.error = '';
-    syncComposer();
-  }
   messageStates.set(selectedDialogue, state);
+  syncComposer();
 }
 
 function handleMessageKey(event) {
   if (event.key !== 'Enter' || event.shiftKey || event.isComposing || composingMessage || event.keyCode === 229) return;
   event.preventDefault();
-  if (messageText.value.trim() && !messageStates.get(selectedDialogue)?.sending) messageForm.requestSubmit();
+  if (messageText.value.trim() && !messageStates.get(selectedDialogue)?.outgoing) messageForm.requestSubmit();
 }
 
-async function sendMessage(event) {
-  event.preventDefault();
+async function sendMessage(event, retry = false) {
+  event?.preventDefault();
   const account = profile;
   const id = selectedDialogue;
-  const text = messageText.value.trim();
-  const state = messageStates.get(id) ?? {};
-  if (!account || signingOut || id === undefined || activeView !== 'messages' || composingMessage || state.sending || !text) return;
   const draft = messageText.value;
-  const current = () => profile === account && selectedDialogue === id;
-  state.text = draft;
+  const state = messageStates.get(id) ?? {};
+  if (!account || signingOut || id === undefined || activeView !== 'messages' || composingMessage || state.sending) return;
+  if (retry ? !state.outgoing : state.outgoing || !draft.trim()) return;
+  if (!retry) {
+    state.text = draft;
+    state.outgoing = { text: draft.trim(), clientId: crypto.randomUUID() };
+    state.outgoingDraft = draft;
+  }
+  const current = () => profile === account && selectedDialogue === id && activeView === 'messages';
   state.error = '';
   state.sending = true;
   messageStates.set(id, state);
   syncComposer();
+  renderDialogueMessages(receivedMessages, byId('messages-content'));
+  scrollConversationEnd();
   try {
-    await post(resource('/api/dialogues', id, '/messages'), { text });
+    const { message } = await post(resource('/api/dialogues', id, '/messages'), state.outgoing);
     if (profile !== account) return;
-    if (state.text === draft) state.text = '';
-    if (current() && activeView === 'messages') {
-      state.scrollOnRefresh = true;
-      refreshDialogue(false, true);
+    if (state.text === state.outgoingDraft) state.text = '';
+    state.outgoing = undefined;
+    if (current()) {
+      setNewDialogueMode(false);
+      await refreshDialogue(false, true);
+      if (current() && message && !receivedMessages.some(({ id }) => id === message.id)) {
+        receivedMessages.push(message);
+        renderDialogueMessages(receivedMessages, byId('messages-content'));
+        scrollConversationEnd();
+      }
     }
     byId('action-status').textContent = 'Сообщение отправлено.';
     loadCabinet({ quiet: true, fresh: true });
   } catch (error) {
-    if (profile === account && !endSession(error)) state.error = error.message;
+    if (profile === account && !endSession(error)) state.error = 'Не удалось подтвердить отправку.';
   } finally {
     state.sending = false;
-    if (current()) syncComposer();
+    if (current()) {
+      syncComposer();
+      renderDialogueMessages(receivedMessages, byId('messages-content'));
+    }
   }
 }
 
@@ -1746,17 +1935,46 @@ async function runSearch(query, account, load) {
 }
 
 byId('cabinet-retry').addEventListener('click', () => loadCabinet({ fresh: true }));
+byId('dialogue-search').addEventListener('input', refreshDialogueList);
+byId('dialogue-filter').addEventListener('change', refreshDialogueList);
+byId('dialogue-back').addEventListener('click', closeDialogue);
+byId('dialogue-new').addEventListener('click', () => setNewDialogueMode(!newDialogueMode));
+byId('messages-new').addEventListener('click', scrollConversationEnd);
+byId('messages-content').addEventListener('scroll', () => {
+  if (atConversationEnd(byId('messages-content'))) byId('messages-new').hidden = true;
+  void acknowledgeMessages();
+});
+document.addEventListener('visibilitychange', acknowledgeMessages);
 messageForm.addEventListener('submit', sendMessage);
 messageText.addEventListener('keydown', handleMessageKey);
 messageText.addEventListener('input', updateDraft);
 messageText.addEventListener('compositionstart', () => { composingMessage = true; });
 messageText.addEventListener('compositionend', () => { composingMessage = false; });
-for (const [emoji, label] of [['🙂', 'Улыбка'], ['👍', 'Палец вверх'], ['👋', 'Привет'], ['🙏', 'Спасибо'], ['🎉', 'Праздник'], ['✅', 'Готово'], ['❤️', 'Сердце'], ['🤔', 'Задумчивость']]) {
-  const button = element('button', 'emoji-button', emoji);
-  button.type = 'button';
-  button.setAttribute('aria-label', label);
-  button.addEventListener('click', () => chooseEmoji(emoji));
-  emojiOptions.append(button);
+const emojiCategories = [
+  ['Лица', [['🙂', 'Улыбка'], ['😀', 'Радость'], ['😂', 'Смех'], ['😊', 'Довольная улыбка'],
+    ['🤔', 'Задумчивость'], ['😉', 'Подмигивание'], ['😎', 'Очки'], ['🤩', 'Восторг'],
+    ['😅', 'Облегчение'], ['😢', 'Грусть'], ['😮', 'Удивление'], ['😴', 'Сон']]],
+  ['Жесты', [['👍', 'Палец вверх'], ['👋', 'Привет'], ['🙏', 'Спасибо'], ['👏', 'Аплодисменты'],
+    ['👌', 'Хорошо'], ['🙌', 'Ура'], ['🤝', 'Рукопожатие'], ['✌️', 'Победа']]],
+  ['Учёба', [['📚', 'Книги'], ['📅', 'Календарь'], ['📝', 'Заметка'], ['📌', 'Кнопка'],
+    ['💡', 'Идея'], ['🎓', 'Выпуск'], ['⏰', 'Будильник'], ['📎', 'Скрепка']]],
+  ['Символы', [['🎉', 'Праздник'], ['✅', 'Готово'], ['❤️', 'Сердце'], ['✨', 'Искры'],
+    ['⭐', 'Звезда'], ['❗', 'Важно'], ['❓', 'Вопрос'], ['🔥', 'Огонь']]],
+];
+for (const [category, options] of emojiCategories) {
+  const group = element('section', 'emoji-category');
+  const heading = element('h3', '', category);
+  const grid = element('div', 'emoji-grid');
+  for (const [emoji, label] of options) {
+    const button = element('button', 'emoji-button', emoji);
+    button.type = 'button';
+    button.setAttribute('aria-label', label);
+    button.title = label;
+    button.addEventListener('click', () => chooseEmoji(emoji));
+    grid.append(button);
+  }
+  group.append(heading, grid);
+  emojiOptions.append(group);
 }
 emojiToggle.addEventListener('click', () => setEmojiPanel(emojiOptions.hidden));
 messageForm.addEventListener('keydown', (event) => {
@@ -1842,7 +2060,21 @@ helpDialog.addEventListener('close', () => {
   }
   if (profile && !viaNavigation) helpLauncher.focus({ preventScroll: true });
 });
-window.visualViewport?.addEventListener('resize', sizeHelpDialog);
+function sizeMessaging() {
+  const viewport = window.visualViewport;
+  if (!viewport) return;
+  const messaging = byId('messaging');
+  if (window.innerHeight - viewport.height > 80 && viewport.scale === 1) {
+    messaging.style.setProperty('--messenger-viewport-height', viewport.height + 'px');
+  } else {
+    messaging.style.removeProperty('--messenger-viewport-height');
+  }
+}
+
+window.visualViewport?.addEventListener('resize', () => {
+  sizeHelpDialog();
+  sizeMessaging();
+});
 window.visualViewport?.addEventListener('scroll', sizeHelpDialog);
 byId('library-retry').addEventListener('click', loadLibrary);
 byId('library-filters').addEventListener('submit', (event) => event.preventDefault());

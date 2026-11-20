@@ -231,9 +231,10 @@ function seedCabinetFixtures(db) {
     const { lastInsertRowid: deanDialogue } = makeDialogue.run(studentId, deanId);
     const { lastInsertRowid: teacherDialogue } = makeDialogue.run(studentId, teacherId);
     message.run(deanDialogue, deanId, 'Демо-сообщение. Здесь можно написать в деканат и уточнить статус справки.', createdAt);
-    message.run(teacherDialogue, teacherId, 'Демо-сообщение. Журнал наблюдений проверен. Комментарий доступен в задании.', createdAt);
     notice.run(studentId, 'Доступны задания', 'Откройте раздел «Задания», чтобы посмотреть сроки и комментарии.', createdAt);
     if (index === 0) {
+      message.run(teacherDialogue, teacherId,
+        'Демо-сообщение. Журнал наблюдений проверен. Комментарий доступен в задании.', createdAt);
       const { lastInsertRowid: requestId } = request.run(studentId, 'Справка об обучении', createdAt);
       history.run(requestId, createdAt);
     }
@@ -318,6 +319,18 @@ export function seedCabinet(db, week) {
       PRIMARY KEY (account_id, book_id)
     ) STRICT;
     PRAGMA user_version = 5;
+  `);
+  if (version < 6) db.exec(`
+    ALTER TABLE messages ADD COLUMN client_id TEXT;
+    ALTER TABLE messages ADD COLUMN is_delivered INTEGER NOT NULL DEFAULT 0 CHECK (is_delivered IN (0, 1));
+    ALTER TABLE messages ADD COLUMN is_read INTEGER NOT NULL DEFAULT 0 CHECK (is_read IN (0, 1) AND is_read <= is_delivered);
+    UPDATE messages AS m SET is_delivered = 1, is_read = 1
+    FROM dialogues AS d WHERE d.id = m.dialogue_id
+      AND m.id <= CASE WHEN m.sender_id = d.student_id THEN d.staff_read_id ELSE d.student_read_id END;
+    ALTER TABLE dialogues DROP COLUMN student_read_id;
+    ALTER TABLE dialogues DROP COLUMN staff_read_id;
+    CREATE UNIQUE INDEX messages_client_id ON messages(dialogue_id, sender_id, client_id);
+    PRAGMA user_version = 6;
   `);
 }
 
@@ -469,16 +482,19 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
   const dean = prepare("SELECT id FROM students WHERE role = 'dean'");
   const dialogues = prepare(`
     SELECT d.id,
-      CASE WHEN d.student_id = :viewerId THEN
-        CASE WHEN staff.role = 'dean' THEN 'Деканат' ELSE staff.full_name END
-        ELSE student.full_name END AS title,
-      CASE WHEN d.student_id = :viewerId AND staff.role = 'teacher' THEN staff.full_name END AS teacherName,
+      CASE WHEN partner.role = 'dean' THEN 'Деканат' ELSE partner.full_name END AS title,
+      CASE WHEN partner.role = 'teacher' THEN partner.full_name END AS teacherName,
+      partner.full_name AS fullName,
+      CASE partner.role WHEN 'dean' THEN 'Деканат' WHEN 'teacher' THEN 'Преподаватель'
+        ELSE COALESCE(NULLIF(TRIM(partner.student_group), ''), 'Студент') END AS roleLabel,
+      last.text AS lastText, last.sender_id = :viewerId AS lastMine, last.created_at AS lastAt,
       (SELECT COUNT(*) FROM messages m WHERE m.dialogue_id = d.id AND m.sender_id <> :viewerId
-        AND m.id > CASE WHEN d.student_id = :viewerId THEN d.student_read_id ELSE d.staff_read_id END) AS unreadCount
-    FROM dialogues d JOIN students staff ON staff.id = d.staff_id
-    JOIN students student ON student.id = d.student_id
+        AND m.is_read = 0) AS unreadCount
+    FROM dialogues d
+    JOIN students partner ON partner.id = CASE WHEN d.student_id = :viewerId THEN d.staff_id ELSE d.student_id END
+    LEFT JOIN messages last ON last.id = (SELECT m.id FROM messages m WHERE m.dialogue_id = d.id ORDER BY m.id DESC LIMIT 1)
     WHERE d.student_id = :viewerId OR d.staff_id = :viewerId
-    ORDER BY d.id
+    ORDER BY last.created_at DESC, last.id DESC, d.id
   `);
   const contactNames = prepare(`
     SELECT teacher AS name FROM lessons WHERE student_id = :viewerId
@@ -489,19 +505,25 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     SELECT staff.full_name FROM enrollments e JOIN students staff ON staff.id = e.teacher_id
     WHERE e.student_id = :viewerId AND staff.role = 'teacher'
   `);
-  const dialogueById = prepare('SELECT student_id FROM dialogues WHERE id = ? AND (student_id = ? OR staff_id = ?)');
-  const messages = prepare(`
-    SELECT m.id, m.sender_id = ? AS mine, sender.full_name AS sender, m.text, m.created_at AS createdAt,
-      m.id <= CASE WHEN m.sender_id = d.student_id THEN d.staff_read_id ELSE d.student_read_id END AS read
+  const dialogueById = prepare('SELECT id FROM dialogues WHERE id = ? AND (student_id = ? OR staff_id = ?)');
+  const messageFields = `
+    SELECT m.id, m.sender_id = :viewerId AS mine, sender.full_name AS sender, m.text, m.created_at AS createdAt,
+      m.is_delivered AS delivered, m.is_read AS read,
+      CASE WHEN m.sender_id = :viewerId THEN m.client_id END AS clientId
     FROM messages m JOIN students sender ON sender.id = m.sender_id
-    JOIN dialogues d ON d.id = m.dialogue_id
-    WHERE m.dialogue_id = ? ORDER BY m.id
+    WHERE m.dialogue_id = :dialogueId
+  `;
+  const messages = prepare(`${messageFields} ORDER BY m.id`);
+  const writtenMessage = prepare(`${messageFields} AND m.id = :messageId`);
+  const sentWithClientId = prepare(`${messageFields} AND m.sender_id = :viewerId AND m.client_id = :clientId`);
+  const setReceipt = prepare(`
+    UPDATE messages SET is_delivered = 1, is_read = MAX(is_read, ?)
+    WHERE id = ? AND dialogue_id = ? AND sender_id <> ?
   `);
-  const lastMessage = prepare('SELECT COALESCE(MAX(id), 0) AS id FROM messages WHERE dialogue_id = ?');
-  const messageInDialogue = prepare('SELECT id FROM messages WHERE id = ? AND dialogue_id = ?');
-  const markStudentRead = prepare('UPDATE dialogues SET student_read_id = MAX(student_read_id, ?) WHERE id = ?');
-  const markStaffRead = prepare('UPDATE dialogues SET staff_read_id = MAX(staff_read_id, ?) WHERE id = ?');
-  const sendMessage = prepare('INSERT INTO messages (dialogue_id, sender_id, text, created_at) VALUES (?, ?, ?, ?)');
+  const sendMessage = prepare(`
+    INSERT INTO messages (dialogue_id, sender_id, text, created_at, client_id) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(dialogue_id, sender_id, client_id) DO NOTHING RETURNING id
+  `);
   const notifications = prepare(`
     SELECT id, title, text, created_at AS createdAt FROM notifications WHERE account_id = ? ORDER BY id DESC
   `);
@@ -625,7 +647,9 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
   function cabinet(viewer) {
     const { id, role } = viewer;
     const conversations = dialogues.all({ viewerId: id })
-      .map(({ teacherName, ...dialogue }) => ({ ...dialogue, contact: demoContact(teacherName) }));
+      .map(({ teacherName, lastMine, ...dialogue }) => ({
+        ...dialogue, lastMine: lastMine === null ? null : Boolean(lastMine), contact: demoContact(teacherName),
+      }));
     return {
       grades: role === 'dean' ? [] : grades.all(id, role, id, role),
       requests: role === 'teacher' ? [] : requests.all(id, role)
@@ -718,29 +742,55 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
   }
 
   function ownedDialogue(viewer, id) {
-    return found(dialogueById.get(id, viewer.id, viewer.id), 'Диалог не найден.');
+    found(dialogueById.get(id, viewer.id, viewer.id), 'Диалог не найден.');
+  }
+
+  function messageView({ mine, delivered, read, clientId, ...message }) {
+    return {
+      ...message, mine: Boolean(mine), delivered: Boolean(delivered), read: Boolean(read),
+      ...(clientId === null ? {} : { clientId }),
+    };
   }
 
   function dialogueMessages(viewer, id) {
     ownedDialogue(viewer, id);
     return {
-      messages: messages.all(viewer.id, id)
-        .map((row) => ({ ...row, mine: Boolean(row.mine), read: Boolean(row.read) })),
+      messages: messages.all({ viewerId: viewer.id, dialogueId: id }).map(messageView),
     };
   }
 
-  function readDialogue(viewer, id, { throughId }) {
-    const dialogue = ownedDialogue(viewer, id);
-    if (throughId !== undefined && (!Number.isSafeInteger(throughId) || !messageInDialogue.get(throughId, id))) {
-      throw new HttpError(404, 'Сообщение не найдено.');
+  function markReceipts(viewer, id, messageIds, read) {
+    if (!Array.isArray(messageIds) || messageIds.some((messageId) => !Number.isSafeInteger(messageId) || messageId < 1)) {
+      throw new HttpError(400, 'Укажите список идентификаторов сообщений.');
     }
-    const mark = dialogue.student_id === viewer.id ? markStudentRead : markStaffRead;
-    mark.run(throughId ?? lastMessage.get(id).id, id);
+    for (const messageId of new Set(messageIds)) {
+      if (!setReceipt.run(read, messageId, id, viewer.id).changes) throw new HttpError(404, 'Сообщение не найдено.');
+    }
   }
 
-  function writeMessage(viewer, id, body) {
+  function deliverMessages(viewer, id, { messageIds }) {
     ownedDialogue(viewer, id);
-    sendMessage.run(id, viewer.id, text(body.text, 'Введите сообщение', 2000), now());
+    markReceipts(viewer, id, messageIds, 0);
+  }
+
+  function readDialogue(viewer, id, { messageIds }) {
+    ownedDialogue(viewer, id);
+    markReceipts(viewer, id, messageIds, 1);
+  }
+
+  function writeMessage(viewer, id, { text: input, clientId }) {
+    ownedDialogue(viewer, id);
+    const content = text(input, 'Введите сообщение', 2000);
+    if (clientId !== undefined && (typeof clientId !== 'string' || !clientId.trim() || clientId.length > 128)) {
+      throw new HttpError(400, 'Недопустимый идентификатор отправки.');
+    }
+    const lookup = { viewerId: viewer.id, dialogueId: id };
+    const inserted = sendMessage.get(id, viewer.id, content, now(), clientId ?? null);
+    const message = inserted
+      ? writtenMessage.get({ ...lookup, messageId: inserted.id })
+      : sentWithClientId.get({ ...lookup, clientId });
+    if (message.text !== content) throw new HttpError(409, 'Идентификатор отправки уже использован.');
+    return { message: messageView(message) };
   }
 
   function assignWork(viewer, _id, body) {
@@ -858,6 +908,7 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     { method: 'POST', path: /^\/api\/requests$/, role: 'student', action: submitRequest },
     { method: 'POST', path: /^\/api\/requests\/([^/]+)\/status$/, role: 'dean', action: changeRequest },
     { method: 'GET', path: /^\/api\/dialogues\/([^/]+)$/, action: dialogueMessages },
+    { method: 'POST', path: /^\/api\/dialogues\/([^/]+)\/delivered$/, action: deliverMessages },
     { method: 'POST', path: /^\/api\/dialogues\/([^/]+)\/read$/, action: readDialogue },
     { method: 'POST', path: /^\/api\/dialogues\/([^/]+)\/messages$/, action: writeMessage },
     { method: 'POST', path: /^\/api\/assignments$/, role: 'teacher', action: assignWork },
@@ -887,14 +938,14 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     if (route.method === 'POST') {
       const data = route.parse ? await route.parse(request, viewer, id) : await jsonBody(request, 16 * 1024);
       if (!data || typeof data !== 'object' || Array.isArray(data)) throw new HttpError(400, 'Ожидается объект JSON.');
-      transaction(() => {
+      const result = transaction(() => {
         const authenticated = authenticate();
         if (route.role && route.role !== authenticated.role) {
           throw new HttpError(403, 'Действие недоступно для вашей роли.');
         }
-        route.action(authenticated, id, data);
+        return route.action(authenticated, id, data);
       });
-      return json(response, 200, { ok: true });
+      return json(response, 200, { ok: true, ...result });
     }
     const result = route.action(viewer, id);
     if (!route.download) return json(response, 200, result);

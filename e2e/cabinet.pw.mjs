@@ -11,12 +11,13 @@ const test = base.extend({
   cabinet: [async ({}, use) => {
     const directory = await mkdtemp(join(tmpdir(), 'cabinet-browser-'));
     const student = randomBytes(18).toString('base64url');
+    const other = randomBytes(18).toString('base64url');
     const dean = randomBytes(18).toString('base64url');
     const teacher = randomBytes(18).toString('base64url');
     const server = spawn(process.execPath, ['server.mjs'], {
       env: {
         HOST: '127.0.0.1', PORT: '0', DB_PATH: join(directory, 'test.sqlite'),
-        DEMO_PASSWORD_1: student, DEMO_PASSWORD_TEACHER: teacher, DEMO_PASSWORD_DEAN: dean,
+        DEMO_PASSWORD_1: student, DEMO_PASSWORD_2: other, DEMO_PASSWORD_TEACHER: teacher, DEMO_PASSWORD_DEAN: dean,
       },
     });
     const stopped = new Promise((resolve) => server.once('close', resolve));
@@ -33,7 +34,7 @@ const test = base.extend({
           if (url) resolve(url);
         });
       });
-      await use({ origin, student, teacher, dean });
+      await use({ origin, student, other, teacher, dean });
     } finally {
       if (server.pid && server.exitCode === null && server.signalCode === null) {
         server.kill();
@@ -47,7 +48,7 @@ const test = base.extend({
 
 async function login(page, cabinet, role = 'student') {
   await page.goto(cabinet.origin);
-  await page.getByLabel('Логин', { exact: true }).fill({ student: 'student1', teacher: 'teacher1', dean: 'dean1' }[role]);
+  await page.getByLabel('Логин', { exact: true }).fill({ student: 'student1', other: 'student2', teacher: 'teacher1', dean: 'dean1' }[role]);
   await page.getByLabel('Пароль', { exact: true }).fill(cabinet[role]);
   await page.getByRole('button', { name: 'Войти', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Главная', exact: true })).toBeVisible();
@@ -144,6 +145,136 @@ test('mobile search opens the document form and campus opens the chosen card', a
   await expect(card).toBeHidden();
 });
 
+for (const width of [360, 440, 1440]) {
+  test(`messenger layout, independent drafts and emoji at ${width} px`, async ({ page, cabinet }) => {
+    await page.setViewportSize({ width, height: width === 440 ? 450 : 820 });
+    await login(page, cabinet);
+    await page.locator('#header-inbox').click();
+    await expect(page.locator('.mobile-header .brand-mark [aria-hidden="true"]')).toHaveText('ЛК');
+    const search = page.getByRole('searchbox', { name: 'Поиск диалогов' });
+    const captureChat = (part) => page.screenshot({ path: `test-results/screenshots/messages-${part}-${width}.png`, animations: 'disabled' });
+    await expect(page.locator('#dialogues-content button')).toHaveCount(2);
+    await captureChat('list');
+    await search.fill('дека');
+    const contact = page.locator('#dialogues-content').getByRole('button', { name: /Деканат/ });
+    await expect(contact).toHaveCount(1);
+    await contact.click();
+    const composer = page.getByRole('textbox', { name: 'Сообщение', exact: true });
+    await expect(composer).toBeInViewport();
+    if (width === 360) {
+      await composer.fill('Добрый день! Подскажите, пожалуйста, статус справки.');
+      await composer.press('Enter');
+      await expect(composer).toHaveValue('');
+    }
+    await composer.fill('Привет мир');
+    await composer.press('Home');
+    await composer.press('ArrowRight');
+    await page.getByRole('button', { name: 'Эмодзи', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Учёба', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Улыбка', exact: true }).click();
+    await expect(composer).toHaveValue('П🙂ривет мир');
+    await fits(page);
+    await captureChat('thread');
+    if (width < 681) {
+      await expect(search).toBeHidden();
+      await page.getByRole('button', { name: 'Назад к диалогам' }).click();
+      await expect(search).toHaveValue('дека');
+      await expect(search).toBeVisible();
+      await contact.click();
+      await expect(composer).toHaveValue('П🙂ривет мир');
+    } else {
+      await expect(search).toBeVisible();
+      await search.fill('');
+      await page.locator('#dialogues-content button').filter({ hasNotText: 'Деканат' }).first().click();
+      await expect(composer).toHaveValue('');
+      await contact.click();
+      await expect(composer).toHaveValue('П🙂ривет мир');
+    }
+  });
+}
+
+test('new conversation shows only authorized contacts without history', async ({ page, cabinet }) => {
+  await login(page, cabinet, 'other');
+  await page.locator('#header-inbox').click();
+  const entries = page.locator('#dialogues-content button');
+  await expect(entries).toHaveCount(1);
+  await expect(entries.first()).toContainText('Деканат');
+  await page.getByRole('button', { name: 'Новый диалог' }).click();
+  await expect(entries).toHaveCount(1);
+  await expect(entries.first()).toContainText('Преподаватель');
+  await entries.first().click();
+  const composer = page.locator('#message-text');
+  await composer.fill('Первый вопрос преподавателю');
+  await composer.press('Enter');
+  await expect(composer).toHaveValue('');
+  await expect(entries).toHaveCount(2);
+  await expect(entries.first()).toContainText('Вы: Первый вопрос преподавателю');
+});
+
+test('message receipt visibility and retry after lost response in independent sessions', async ({ page, browser, cabinet }) => {
+  test.setTimeout(65000);
+  await login(page, cabinet);
+  const receiver = await browser.newContext({ viewport: { width: 360, height: 490 } });
+  try {
+    const dean = await receiver.newPage();
+    await login(dean, cabinet, 'dean');
+    await page.locator('#header-inbox').click();
+    await page.locator('#dialogues-content button').filter({ hasText: 'Деканат' }).click();
+    const composer = page.locator('#message-text');
+    const routePattern = '**/api/dialogues/*/messages';
+    let lost = false;
+    await page.route(routePattern, async (route) => {
+      if (lost) return route.continue();
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      lost = true;
+      await route.abort('failed');
+    });
+    const text = 'Повтор после потери ответа ' + randomBytes(5).toString('hex');
+    await composer.fill(text);
+    await composer.press('Enter');
+    await expect(page.getByRole('img', { name: 'Отправка не подтверждена' })).toBeVisible();
+    await page.getByRole('button', { name: 'Повторить', exact: true }).click();
+    await expect(composer).toHaveValue('');
+    const row = page.locator('.record-row').filter({ hasText: text });
+    await expect(row).toHaveCount(1);
+    await expect(row.getByRole('img', { name: 'Сохранено на сервере' })).toBeVisible();
+
+    const threadId = await page.locator('#dialogues-content button[aria-pressed="true"]').getAttribute('id');
+    const url = cabinet.origin + '/api/dialogues/' + threadId.split('-').at(-1);
+    for (let index = 0; index < 12; index++) {
+      const result = await page.request.post(url + '/messages', {
+        headers: { Origin: cabinet.origin },
+        data: { text: 'Длинная переписка ' + index + '\n' + 'Строка сообщения. '.repeat(28), clientId: text + '-' + index },
+      });
+      expect(result.ok()).toBe(true);
+    }
+
+    await dean.locator('#header-inbox').click();
+    await dean.locator('#dialogues-content button').filter({ hasText: 'Нюша' }).click();
+    const receiverRow = dean.locator('.record-row').filter({ hasText: text });
+    await expect(receiverRow).not.toBeInViewport();
+    await expect(row.getByRole('img', { name: 'Доставлено', exact: true })).toBeVisible({ timeout: 15000 });
+    await receiverRow.scrollIntoViewIfNeeded();
+    await expect(receiverRow).toBeInViewport();
+    await expect(row.getByRole('img', { name: 'Прочитано', exact: true })).toBeVisible({ timeout: 15000 });
+    await expect(dean.locator('#message-text')).toBeInViewport();
+    const history = dean.locator('#messages-content');
+    const scrollPosition = await history.evaluate((node) => node.scrollTop);
+    await composer.fill('Новое сообщение в длинной истории');
+    await composer.press('Enter');
+    await expect(dean.getByRole('button', { name: 'Новые сообщения' })).toBeVisible({ timeout: 15000 });
+    expect(await history.evaluate((node) => node.scrollTop)).toBe(scrollPosition);
+    await dean.getByRole('button', { name: 'Новые сообщения' }).click();
+    await expect(dean.locator('.record-row').filter({ hasText: 'Новое сообщение в длинной истории' })).toBeInViewport();
+    const thread = await (await page.request.get(url)).json();
+    expect(thread.messages.filter((message) => message.text === text)).toHaveLength(1);
+    await fits(dean);
+  } finally {
+    await receiver.close();
+  }
+});
+
 test('composer handles Enter and Shift+Enter; helper routes known and unknown queries', async ({ page, cabinet }) => {
   await login(page, cabinet);
   await page.locator('#header-inbox').click();
@@ -168,6 +299,7 @@ test('composer handles Enter and Shift+Enter; helper routes known and unknown qu
   await expect(page.locator('.message-mine .record-copy').filter({ hasText: first })).toHaveJSProperty('textContent', first + '\n' + second);
   await expect(composer).toHaveValue('');
 
+  await page.locator('.sidebar [data-view="home"]').click();
   await page.locator('#help-launcher').click();
   const question = page.getByRole('combobox', { name: 'Вопрос о кабинете' });
   const answer = page.locator('#help-answer');

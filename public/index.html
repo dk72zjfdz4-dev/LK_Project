@@ -82,7 +82,7 @@
     <header class="app-header">
       <div class="mobile-header">
         <a class="avatar mobile-avatar" id="mobile-avatar" href="#profile" aria-label="Открыть профиль"></a>
-        <span class="brand">Личный кабинет</span>
+        <span class="brand brand-mark"><span aria-hidden="true">ЛК</span><span class="visually-hidden">Личный кабинет</span></span>
       </div>
       <form class="app-search" id="search-form" role="search">
         <label class="visually-hidden" for="search-query">Поиск по кабинету</label>
@@ -186,22 +186,64 @@
         <section class="view" id="view-messages" aria-label="Переписка" hidden>
           <div class="messaging" id="messaging" hidden>
             <section class="panel dialogue-panel" aria-labelledby="dialogues-heading">
-              <h2 id="dialogues-heading">Диалоги</h2>
+              <div class="dialogues-header">
+                <div class="dialogues-title">
+                  <h2 id="dialogues-heading">Диалоги</h2>
+                  <span class="icon-control">
+                    <button class="button button-secondary icon-button" id="dialogue-new" type="button" aria-label="Новый диалог" aria-pressed="false" aria-controls="dialogues-content"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+                    <span class="icon-tooltip" aria-hidden="true">Новый диалог</span>
+                  </span>
+                </div>
+                <div class="dialogue-search">
+                  <label class="visually-hidden" for="dialogue-search">Поиск диалогов</label>
+                  <span class="nav-icon icon-search" aria-hidden="true"></span>
+                  <input id="dialogue-search" type="search" placeholder="Поиск диалогов" maxlength="100" autocomplete="off" aria-controls="dialogues-content">
+                </div>
+                <label class="visually-hidden" for="dialogue-filter">Фильтр диалогов</label>
+                <select id="dialogue-filter" aria-controls="dialogues-content">
+                  <option value="all">Все диалоги</option>
+                  <option value="unread">Непрочитанные</option>
+                </select>
+              </div>
               <div class="dialogue-list" id="dialogues-content"></div>
             </section>
             <section class="panel conversation" aria-labelledby="dialogue-heading">
-              <h2 id="dialogue-heading" tabindex="-1">Переписка</h2>
-              <div id="dialogue-contact"></div>
-              <p class="local-error" id="dialogue-error" role="alert"></p>
-              <div id="messages-content"><p class="empty-state">Выберите диалог.</p></div>
-              <form class="cabinet-form message-form" id="message-form" hidden>
-                <label for="message-text">Сообщение</label>
-                <textarea id="message-text" name="text" rows="2" maxlength="2000" required></textarea>
-                <p class="local-error" id="message-error" role="alert"></p>
-                <div class="message-actions">
-                  <button class="button button-primary" id="message-submit" type="submit">Отправить</button>
-                  <button class="button button-secondary" id="emoji-toggle" type="button" aria-expanded="false" aria-controls="emoji-options">Эмодзи</button>
+              <div class="conversation-header">
+                <div class="conversation-title">
+                  <span class="icon-control dialogue-back">
+                    <button class="button button-secondary icon-button" id="dialogue-back" type="button" aria-label="Назад к диалогам" aria-controls="dialogues-content"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m7-7-7 7 7 7"/></svg></button>
+                    <span class="icon-tooltip" aria-hidden="true">Назад к диалогам</span>
+                  </span>
+                  <span class="dialogue-avatar" id="dialogue-avatar" aria-hidden="true"></span>
+                  <div class="conversation-name">
+                    <h2 id="dialogue-heading" tabindex="-1">Переписка</h2>
+                    <p class="dialogue-role" id="dialogue-role"></p>
+                  </div>
                 </div>
+                <details class="dialogue-contact" id="dialogue-info">
+                  <summary>Контакт</summary>
+                  <div id="dialogue-contact"></div>
+                </details>
+              </div>
+              <p class="local-error dialogue-error" id="dialogue-error" role="alert"></p>
+              <div class="messages-pane">
+                <div id="messages-content" tabindex="0" role="region" aria-label="История сообщений"><p class="empty-state">Выберите диалог.</p></div>
+                <button class="button button-secondary" id="messages-new" type="button" hidden>Новые сообщения <span aria-hidden="true">↓</span></button>
+              </div>
+              <form class="cabinet-form message-form" id="message-form" hidden>
+                <div class="message-input-row">
+                  <span class="icon-control">
+                    <button class="button button-secondary icon-button" id="emoji-toggle" type="button" aria-label="Эмодзи" aria-expanded="false" aria-controls="emoji-options"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 14c.8 1.2 2.2 2 4 2s3.2-.8 4-2M9 9h.01M15 9h.01"/></svg></button>
+                    <span class="icon-tooltip" aria-hidden="true">Эмодзи</span>
+                  </span>
+                  <label class="visually-hidden" for="message-text">Сообщение</label>
+                  <textarea id="message-text" name="text" rows="1" maxlength="2000" placeholder="Сообщение" required></textarea>
+                  <span class="icon-control">
+                    <button class="button button-primary icon-button" id="message-submit" type="submit" aria-label="Отправить"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 18-7-6 16-3.5-7L3 11Zm8.5 2L21 4"/></svg></button>
+                    <span class="icon-tooltip" aria-hidden="true">Отправить</span>
+                  </span>
+                </div>
+                <p class="local-error" id="message-error" role="alert"></p>
                 <div class="emoji-options" id="emoji-options" aria-label="Эмодзи" role="group" hidden></div>
               </form>
             </section>

@@ -156,15 +156,29 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   assert.deepEqual((await search('Когда можно забрать справку?', student)).results, []);
   assert.ok((await expect(thread, dean)).messages.some((row) => row.text === 'Когда можно забрать справку?' && !row.mine));
   const beforeReply = (await cabinet(student)).unreadCount;
-  await expect(thread + '/messages', dean, { text: 'Завтра после 14:00.' });
+  const replyDraft = { text: 'Завтра после 14:00.', clientId: 'workflow-retry-' + randomBytes(12).toString('hex') };
+  const sent = await expect(thread + '/messages', dean, replyDraft);
+  const retried = await expect(thread + '/messages', dean, replyDraft);
+  assert.equal(sent.message.id, retried.message.id);
+  await expect(thread + '/messages', dean, { ...replyDraft, text: 'Другой текст' }, 409);
   assert.equal((await cabinet(student)).unreadCount, beforeReply + 1);
   const reply = (await expect(thread, student)).messages.find((row) => row.text === 'Завтра после 14:00.' && !row.mine);
   assert.equal(reply.read, false);
+  assert.equal(reply.delivered, false);
+  await expect(thread + '/delivered', other, { messageIds: [reply.id] }, 404);
+  await expect(thread + '/read', other, { messageIds: [reply.id] }, 404);
+  await expect(thread + '/read', dean, { messageIds: [reply.id] }, 404);
+  await expect(thread + '/delivered', student, { messageIds: [reply.id] });
+  const delivered = (await expect(thread, dean)).messages.find(({ id }) => id === reply.id);
+  assert.equal(delivered.delivered, true);
+  assert.equal(delivered.read, false);
   await expect(thread + '/messages', dean, { text: 'Возьмите номер заявки.' });
-  await expect(thread + '/read', student, { throughId: reply.id });
+  await expect(thread + '/read', student, { messageIds: [reply.id] });
   const afterRead = (await expect(thread, dean)).messages;
   assert.equal(afterRead.find(({ id }) => id === reply.id).read, true);
   assert.equal(afterRead.at(-1).read, false);
+  await expect(thread + '/delivered', student, { messageIds: [reply.id] });
+  assert.equal((await expect(thread, dean)).messages.find(({ id }) => id === reply.id).read, true);
 
   const teaching = initial.dialogues.find((item) => item.id !== dialog.id);
   assert.ok(teaching);
@@ -174,7 +188,7 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   await expect(teachingThread + '/messages', teacher, { text: 'Критерии указаны в задании.' });
   const teacherReply = (await expect(teachingThread, student)).messages.find((row) => row.text === 'Критерии указаны в задании.');
   assert.ok(teacherReply);
-  await expect(thread + '/read', student, { throughId: teacherReply.id }, 404);
+  await expect(thread + '/read', student, { messageIds: [teacherReply.id] }, 404);
 
   const enrollment = (await cabinet(teacher)).grades.find((row) => /Нюша/.test(row.studentName));
   assert.ok(enrollment);
@@ -271,7 +285,9 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   assert.equal(decision.oldPoints, 7);
   assert.equal(decision.newPoints, 9);
   assert.equal(decision.comment, 'Вывод подтверждён.');
-  assert.ok((await expect(thread, student)).messages.some((row) => row.text === 'Завтра после 14:00.'));
+  const persistedReply = (await expect(thread, student)).messages.find((row) => row.text === 'Завтра после 14:00.');
+  assert.equal(persistedReply.delivered, true);
+  assert.equal(persistedReply.read, true);
   assert.equal((await request(submitted + '/file', student)).status, 200);
   const documentWork = persisted.assignments.find(({ id }) => id === documentTask.id).submission;
   const document = await request('/submissions/' + documentWork.id + '/file', teacher);

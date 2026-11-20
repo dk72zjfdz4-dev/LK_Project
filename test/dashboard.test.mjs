@@ -115,7 +115,7 @@ test('grade rendering displays fractional results without floating-point tails',
 });
 
 test('composer handles Enter, Shift, IME and duplicate submissions', async () => {
-  const messageText = { value: '', selectionStart: 2, selectionEnd: 2, maxLength: 2000 };
+  const messageText = { value: '', selectionStart: 2, selectionEnd: 2, maxLength: 2000, style: {}, scrollHeight: 44 };
   const messageStates = new Map();
   let submits = 0;
   let requests = 0;
@@ -130,6 +130,8 @@ test('composer handles Enter, Shift, IME and duplicate submissions', async () =>
     byId: () => ({}), post: () => { requests++; return pending; },
     resource: () => '/api/dialogues/7/messages', endSession: () => false,
     emojiOptions: {}, emojiToggle: { setAttribute() {} },
+    crypto: { randomUUID: () => 'retry-token' }, receivedMessages: [],
+    renderDialogueMessages() {}, scrollConversationEnd() {},
   });
   const enter = (flags = {}) => {
     let prevented = false;
@@ -160,7 +162,8 @@ test('composer handles Enter, Shift, IME and duplicate submissions', async () =>
   reject(new Error('Сеть недоступна'));
   await first;
   assert.equal(messageText.value, 'До🙂 после');
-  assert.equal(messageStates.get(7).error, 'Сеть недоступна');
+  assert.equal(messageStates.get(7).error, 'Не удалось подтвердить отправку.');
+  assert.equal(messageStates.get(7).outgoing.clientId, 'retry-token');
   assert.equal(messageStates.get(7).sending, false);
 });
 
