@@ -7,7 +7,7 @@
   }
 
   .sidebar .primary-nav { flex: 1 1 auto; }
-  .sidebar .primary-nav a { min-width: 0; overflow-wrap: anywhere; }
+  .sidebar .primary-nav :is(a, .nav-toggle) { min-width: 0; overflow-wrap: anywhere; }
   .sidebar-account .sidebar-person > div { min-width: 0; }
 
   .messaging > *, .cabinet-form > *, .record-meta > * { min-width: 0; }
@@ -28,7 +28,7 @@
   }
 
   .sidebar .primary-nav { padding-inline: 4px; }
-  .sidebar .primary-nav a { gap: 7px; min-height: 44px; padding-inline: 6px; }
+  .sidebar .primary-nav :is(a, .nav-toggle) { gap: 7px; min-height: 44px; padding-inline: 6px; }
   .sidebar-account { padding-inline: 4px; }
   .sidebar-account .logout-button { min-height: 44px; }
   .home-grid { gap: 10px; }
@@ -41,7 +41,9 @@
 @media (680px < width <= 880px) {
   .app-shell { --sidebar-width: 164px; }
   .sidebar .brand { font-size: .85rem; }
-  .sidebar .primary-nav a { font-size: .8rem; }
+  .sidebar .primary-nav :is(a, .nav-toggle) { font-size: .8rem; }
+  .sidebar .nav-children [data-view="messages"] { gap: 4px; }
+  .sidebar .nav-children .nav-count { min-width: 17px; padding-inline: 2px; }
   .sidebar .sidebar-person { gap: 6px; }
   .sidebar-person .avatar { width: 32px; height: 32px; }
   .sidebar .sidebar-name { font-size: .78rem; }

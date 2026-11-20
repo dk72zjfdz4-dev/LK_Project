@@ -21,7 +21,6 @@ const roleViews = {
   dean: ['home', 'requests', 'library', 'messages', 'contacts', 'updates', 'campus', 'profile', 'menu'],
 };
 const roleNames = { student: 'Студент', teacher: 'Преподаватель', dean: 'Деканат' };
-const roleBrand = { student: 'студента', teacher: 'преподавателя', dean: 'деканата' };
 const weekdays = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
 const shortWeekdays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const dateFormat = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', timeZone: 'UTC' });
@@ -58,6 +57,7 @@ let selectedGradeSemester;
 let selectedDialogue;
 let dialogueLoad;
 let lessonOpen;
+const openNavGroups = new Set();
 let pendingTarget;
 let menuScroll = 0;
 let pointerNavigation = false;
@@ -125,6 +125,7 @@ function route(focusHeading = false) {
     helpNavigationClose = true;
     helpDialog.close();
   }
+  if (lessonOpen && active !== activeView) closeLesson(false);
   pageHash = requested === 'help' ? '#home' : window.location.hash;
   if (active !== 'campus') closeCampusCard();
   pendingTarget = active === requested && targetId ? targetId : undefined;
@@ -143,6 +144,9 @@ function route(focusHeading = false) {
       link.removeAttribute('aria-current');
     }
   }
+  const group = document.querySelector('.sidebar .nav-group [data-view="' + active + '"]')?.closest('.nav-group');
+  if (group) openNavGroups.add(group.dataset.navGroup);
+  renderNavGroups();
   const heading = byId('page-heading');
   heading.textContent = views[active];
   byId('header-inbox').hidden = active !== 'home';
@@ -189,6 +193,8 @@ function preservePagePosition(update) {
 }
 
 function showLogin(message = '', focusHeading = false) {
+  closeLesson(false);
+  openNavGroups.clear();
   profile = undefined;
   activeView = schedule = scheduleLoad = cabinet = cabinetLoad = selectedDay = selectedHomeDay = selectedDialogue = dialogueLoad = lessonOpen = undefined;
   selectedGradeSemester = undefined;
@@ -226,7 +232,6 @@ function showLogin(message = '', focusHeading = false) {
   closeCampusCard();
   byId('campus-room-form').reset();
   byId('campus-room-result').textContent = '';
-  byId('lesson-dialog').close();
   byId('session-loading').hidden = true;
   byId('app').hidden = true;
   byId('login-screen').hidden = false;
@@ -288,7 +293,6 @@ function showApp(account, focusHeading = false) {
   byId('profile-initials').textContent = initials;
   byId('sidebar-name').textContent = account.fullName;
   byId('welcome-name').textContent = (profile.role === 'student' ? 'Привет, ' : 'Здравствуйте, ') + (account.firstName || account.fullName) + '!';
-  byId('brand-role').textContent = roleBrand[profile.role];
   byId('profile-role').textContent = roleName;
   byId('sidebar-group').textContent = groupOrRole;
   byId('document-catalog').hidden = profile.role !== 'student';
@@ -335,15 +339,55 @@ function lessonTitle(lesson, level) {
   const heading = element(level, 'lesson-title');
   const button = element('button', 'lesson-link', lesson.title);
   button.type = 'button';
-  button.addEventListener('click', () => openLesson(lesson.id));
+  button.addEventListener('click', () => openLesson(lesson.id, button));
   heading.append(button);
   return heading;
 }
 
-async function openLesson(id) {
+function closeLesson(restore = true) {
+  const dialog = byId('lesson-dialog');
+  const opened = lessonOpen;
+  lessonOpen = undefined;
+  if (dialog.open) dialog.close();
+  if (!restore || !opened) return;
+  const trigger = opened.trigger.isConnected ? opened.trigger : byId('lesson-' + opened.id)?.querySelector('.lesson-link');
+  trigger?.focus({ preventScroll: true });
+  window.scrollTo(opened.x, opened.y);
+}
+
+const lessonDialog = byId('lesson-dialog');
+let lessonOutsidePointer;
+function outsideLesson(event) {
+  const bounds = lessonDialog.getBoundingClientRect();
+  return event.target === lessonDialog && (event.clientX < bounds.left || event.clientX >= bounds.right
+    || event.clientY < bounds.top || event.clientY >= bounds.bottom);
+}
+
+byId('lesson-close').addEventListener('click', () => closeLesson());
+lessonDialog.addEventListener('cancel', (event) => {
+  event.preventDefault();
+  closeLesson();
+});
+lessonDialog.addEventListener('pointerdown', (event) => {
+  lessonOutsidePointer = event.button === 0 && outsideLesson(event);
+});
+lessonDialog.addEventListener('pointerup', (event) => {
+  lessonOutsidePointer &&= outsideLesson(event);
+});
+lessonDialog.addEventListener('pointercancel', () => { lessonOutsidePointer = false; });
+lessonDialog.addEventListener('click', (event) => {
+  if (lessonOutsidePointer && outsideLesson(event)) {
+    event.preventDefault();
+    closeLesson();
+  }
+  lessonOutsidePointer = false;
+});
+
+async function openLesson(id, trigger) {
   const dialog = byId('lesson-dialog');
   const content = byId('lesson-dialog-content');
-  const load = { account: profile };
+  const load = { account: profile, id, trigger, x: window.scrollX, y: window.scrollY };
+  lessonOutsidePointer = false;
   lessonOpen = load;
   byId('lesson-dialog-heading').textContent = 'Занятие';
   content.replaceChildren(element('p', 'muted', 'Загружаем занятие…'));
@@ -1034,7 +1078,7 @@ async function openTeacherDialogue(teacherId, button, errorOutput, event) {
     if (!updated?.dialogues.some(({ id }) => id === dialogueId)) {
       throw new Error('Не удалось загрузить диалог. Попробуйте ещё раз.');
     }
-    dialog?.close();
+    if (dialog) closeLesson(false);
     navigateFromLink('#messages/dialogue-' + dialogueId, event);
   } catch (error) {
     if (current() && !endSession(error)) {
@@ -2307,8 +2351,28 @@ byId('mobile-logout').addEventListener('click', logout);
 const mobileNav = byId('mobile-nav');
 for (const group of document.querySelectorAll('.sidebar .nav-group')) {
   const copy = group.cloneNode(true);
-  for (const link of copy.querySelectorAll('[data-view="schedule"], [data-view="messages"]')) link.remove();
+  const children = copy.querySelector('.nav-children');
+  children.id = 'mobile-' + copy.dataset.navGroup;
+  copy.querySelector('.nav-toggle').setAttribute('aria-controls', children.id);
   mobileNav.append(copy);
+}
+
+function renderNavGroups() {
+  for (const group of document.querySelectorAll('.nav-group')) {
+    const children = group.querySelector('.nav-children');
+    const open = openNavGroups.has(group.dataset.navGroup);
+    group.hidden = !children.querySelector('a:not([hidden])');
+    children.hidden = !open;
+    group.querySelector('.nav-toggle').setAttribute('aria-expanded', String(open));
+  }
+}
+
+for (const button of document.querySelectorAll('.nav-toggle')) {
+  button.addEventListener('click', () => {
+    const key = button.closest('.nav-group').dataset.navGroup;
+    if (!openNavGroups.delete(key)) openNavGroups.add(key);
+    renderNavGroups();
+  });
 }
 
 byId('day-picker').addEventListener('change', (event) => selectDay(event.target.value));

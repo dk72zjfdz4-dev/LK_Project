@@ -18,8 +18,8 @@
   <main class="login-layout" id="login-screen" hidden>
     <div class="login-cover">
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true">ЛК</span>
-        <span>Личный кабинет<br>студента</span>
+        <span aria-hidden="true">ЛК</span>
+        <span class="visually-hidden">Личный кабинет</span>
       </div>
       <p class="prototype-notice">Конкурсный прототип. Неофициальный сервис</p>
     </div>
@@ -43,38 +43,44 @@
   <div class="app-shell" id="app" hidden>
     <aside class="sidebar">
       <div class="brand">
-        <span>Личный кабинет<br><span id="brand-role">студента</span></span>
+        <span aria-hidden="true">ЛК</span><span class="visually-hidden">Личный кабинет</span>
       </div>
       <nav class="primary-nav" aria-label="Разделы кабинета">
         <a href="#home" data-view="home"><span class="nav-icon icon-home" aria-hidden="true"></span>Главная</a>
-        <div class="nav-group" role="group" aria-label="Учёба">
-          <p class="nav-heading" aria-hidden="true">Учёба</p>
-          <a href="#schedule" data-view="schedule"><span class="nav-icon icon-calendar" aria-hidden="true"></span>Расписание</a>
-          <a href="#grades" data-view="grades"><span class="nav-icon icon-grades" aria-hidden="true"></span>Успеваемость</a>
-          <a href="#assignments" data-view="assignments"><span class="nav-icon icon-sheet" aria-hidden="true"></span>Задания</a>
-          <a href="#library" data-view="library"><span class="nav-icon icon-book" aria-hidden="true"></span>Библиотека</a>
+        <div class="nav-group" data-nav-group="study">
+          <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="sidebar-study"><span class="nav-icon icon-book" aria-hidden="true"></span>Учёба<span class="nav-chevron" aria-hidden="true"></span></button>
+          <div id="sidebar-study" class="nav-children" hidden>
+            <a href="#schedule" data-view="schedule"><span class="nav-icon icon-calendar" aria-hidden="true"></span>Расписание</a>
+            <a href="#grades" data-view="grades"><span class="nav-icon icon-grades" aria-hidden="true"></span>Успеваемость</a>
+            <a href="#assignments" data-view="assignments"><span class="nav-icon icon-sheet" aria-hidden="true"></span>Задания</a>
+            <a href="#library" data-view="library"><span class="nav-icon icon-book" aria-hidden="true"></span>Библиотека</a>
+            <a href="#messages" data-view="messages"><span class="nav-icon icon-message" aria-hidden="true"></span>Сообщения<span class="count-badge nav-count" data-unread hidden></span></a>
+          </div>
         </div>
-        <div class="nav-group" role="group" aria-label="Сервисы">
-          <p class="nav-heading" aria-hidden="true">Сервисы</p>
-          <a href="#requests" data-view="requests"><span class="nav-icon icon-sheet" aria-hidden="true"></span>Справки и документы</a>
-          <a href="#messages" data-view="messages"><span class="nav-icon icon-message" aria-hidden="true"></span>Сообщения<span class="count-badge nav-count" data-unread hidden></span></a>
-          <a href="#updates" data-view="updates"><span class="nav-icon icon-bell" aria-hidden="true"></span>Уведомления</a>
+        <div class="nav-group" data-nav-group="services">
+          <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="sidebar-services"><span class="nav-icon icon-sheet" aria-hidden="true"></span>Сервисы<span class="nav-chevron" aria-hidden="true"></span></button>
+          <div id="sidebar-services" class="nav-children" hidden>
+            <a href="#requests" data-view="requests"><span class="nav-icon icon-sheet" aria-hidden="true"></span>Справки и документы</a>
+            <a href="#updates" data-view="updates"><span class="nav-icon icon-bell" aria-hidden="true"></span>Уведомления</a>
+          </div>
         </div>
-        <div class="nav-group" role="group" aria-label="Кампус">
-          <p class="nav-heading" aria-hidden="true">Кампус</p>
-          <a href="#campus" data-view="campus"><span class="nav-icon icon-calendar" aria-hidden="true"></span>Карта кампуса</a>
-          <a href="#contacts" data-view="contacts"><span class="nav-icon icon-profile" aria-hidden="true"></span>Контакты</a>
+        <div class="nav-group" data-nav-group="campus">
+          <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="sidebar-campus"><span class="nav-icon icon-calendar" aria-hidden="true"></span>Кампус<span class="nav-chevron" aria-hidden="true"></span></button>
+          <div id="sidebar-campus" class="nav-children" hidden>
+            <a href="#campus" data-view="campus"><span class="nav-icon icon-calendar" aria-hidden="true"></span>Карта кампуса</a>
+            <a href="#contacts" data-view="contacts"><span class="nav-icon icon-profile" aria-hidden="true"></span>Контакты</a>
+          </div>
         </div>
-        <a href="#profile" data-view="profile"><span class="nav-icon icon-profile" aria-hidden="true"></span>Профиль</a>
       </nav>
       <div class="sidebar-account">
-        <div class="sidebar-person">
+        <a class="sidebar-person sidebar-profile" href="#profile" data-view="profile" aria-label="Открыть профиль" aria-describedby="sidebar-name sidebar-group">
           <span class="avatar" id="sidebar-initials" aria-hidden="true"></span>
           <div>
             <span class="sidebar-name" id="sidebar-name"></span>
             <span class="sidebar-group" id="sidebar-group"></span>
           </div>
-        </div>
+          <span class="nav-icon icon-profile" aria-hidden="true"></span>
+        </a>
         <button class="logout-button" id="logout" type="button">Выйти</button>
       </div>
     </aside>
@@ -82,7 +88,7 @@
     <header class="app-header">
       <div class="mobile-header">
         <a class="avatar mobile-avatar" id="mobile-avatar" href="#profile" aria-label="Открыть профиль"></a>
-        <span class="brand brand-mark"><span aria-hidden="true">ЛК</span><span class="visually-hidden">Личный кабинет</span></span>
+        <span class="brand"><span aria-hidden="true">ЛК</span><span class="visually-hidden">Личный кабинет</span></span>
       </div>
       <form class="app-search" id="search-form" role="search">
         <label class="visually-hidden" for="search-query">Поиск по кабинету</label>
@@ -405,7 +411,7 @@
   <dialog class="lesson-dialog panel" id="lesson-dialog" aria-labelledby="lesson-dialog-heading">
     <div class="panel-heading">
       <h2 id="lesson-dialog-heading">Занятие</h2>
-      <form method="dialog"><button class="button button-secondary" type="submit" autofocus>Закрыть</button></form>
+      <button class="button button-secondary" id="lesson-close" type="button" autofocus>Закрыть</button>
     </div>
     <div id="lesson-dialog-content" aria-live="polite"></div>
   </dialog>

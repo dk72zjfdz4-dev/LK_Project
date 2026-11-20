@@ -74,7 +74,6 @@
   }
 
   .mobile-avatar { flex: 0 0 44px; text-decoration: none; }
-  .mobile-header .brand-mark { width: 36px; height: 36px; }
 
   .messaging {
     grid-template-columns: minmax(0, 1fr);
@@ -109,8 +108,7 @@
     background: var(--glass);
   }
 
-  .mobile-menu-groups .nav-heading { margin: 4px 8px; }
-  .mobile-menu-groups a { min-height: 44px; overflow-wrap: anywhere; }
+  .mobile-menu-groups :is(a, .nav-toggle) { min-height: 44px; overflow-wrap: anywhere; }
   .mobile-menu-groups a + a { border-top: 1px solid var(--glass-edge); }
   .mobile-menu-groups .nav-icon { flex: 0 0 16px; }
 

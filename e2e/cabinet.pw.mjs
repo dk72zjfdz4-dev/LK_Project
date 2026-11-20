@@ -54,6 +54,11 @@ async function login(page, cabinet, role = 'student') {
   await expect(page.getByRole('heading', { name: 'Главная', exact: true })).toBeVisible();
 }
 
+async function expandGroup(navigation, name) {
+  const button = navigation.getByRole('button', { name, exact: true });
+  if (await button.getAttribute('aria-expanded') === 'false') await button.click();
+}
+
 async function fits(page) {
   expect(await page.evaluate(() => globalThis.document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize().width);
 }
@@ -89,6 +94,8 @@ for (const width of [360, 390, 440]) {
     await menuTab.click();
     const menu = page.locator('#view-menu');
     await expect(menu).toBeVisible();
+    await expandGroup(menu, 'Сервисы');
+    await expandGroup(menu, 'Кампус');
     await expect(menu.getByRole('link', { name: 'Справки и документы' })).toBeVisible();
     if (width === 360) await capture(page, 'menu');
     await menu.getByRole('button', { name: 'Выйти' }).scrollIntoViewIfNeeded();
@@ -115,6 +122,7 @@ test('teacher login and role-specific navigation', async ({ page, cabinet }) => 
   await login(page, cabinet, 'teacher');
   const navigation = page.locator('.sidebar nav');
   await expect(page.locator('#sidebar-initials')).toHaveText('МЛ');
+  await expandGroup(navigation, 'Учёба');
   await expect(navigation.getByRole('link', { name: 'Задания' })).toBeVisible();
   await expect(navigation.getByRole('link', { name: 'Справки и документы' })).toHaveCount(0);
 });
@@ -133,6 +141,7 @@ test('mobile search opens the document form and campus opens the chosen card', a
   await expect(form.getByRole('button', { name: 'Подать заявку' })).toBeVisible();
 
   await page.locator('.mobile-tabs').getByRole('link', { name: 'Меню' }).click();
+  await expandGroup(page.locator('#mobile-nav'), 'Кампус');
   await page.locator('#view-menu').getByRole('link', { name: 'Карта кампуса' }).click();
   await page.getByRole('button', { name: 'Корпус Б', exact: true }).click();
   const card = page.locator('#campus-card');
@@ -150,7 +159,7 @@ for (const width of [360, 440, 1440]) {
     await page.setViewportSize({ width, height: width === 440 ? 450 : 820 });
     await login(page, cabinet);
     await page.locator('#header-inbox').click();
-    await expect(page.locator('.mobile-header .brand-mark [aria-hidden="true"]')).toHaveText('ЛК');
+    await expect(page.locator('.mobile-header .brand [aria-hidden="true"]')).toHaveText('ЛК');
     const search = page.getByRole('searchbox', { name: 'Поиск диалогов' });
     const captureChat = (part) => page.screenshot({ path: `test-results/screenshots/messages-${part}-${width}.png`, animations: 'disabled' });
     await expect(page.locator('#dialogues-content button')).toHaveCount(2);
@@ -306,6 +315,7 @@ for (const width of [360, 440]) {
 
     const menu = page.locator('.mobile-tabs [data-view=menu]');
     await menu.click();
+    await expandGroup(page.locator('#mobile-nav'), 'Кампус');
     await page.locator('#view-menu').getByRole('link', { name: 'Контакты', exact: true }).click();
     const contacts = page.locator('#contacts-content .contact-card');
     const linked = contacts.filter({ has: page.getByRole('heading', { name: teacher.name, exact: true }) });
@@ -316,6 +326,7 @@ for (const width of [360, 440]) {
     expect((await data('/cabinet')).dialogues.filter(({ fullName }) => fullName === teacher.name)).toHaveLength(1);
 
     await menu.click();
+    await expandGroup(page.locator('#mobile-nav'), 'Учёба');
     await page.locator('#view-menu').getByRole('link', { name: 'Успеваемость', exact: true }).click();
     const semester = page.getByRole('combobox', { name: 'Семестр' });
     const subject = page.locator('#grades-content details').filter({ hasText: 'Зельеварение' });
@@ -344,6 +355,7 @@ for (const width of [360, 440]) {
       await dean.close();
     }
     await menu.click();
+    await expandGroup(page.locator('#mobile-nav'), 'Сервисы');
     await page.locator('#view-menu').getByRole('link', { name: 'Справки и документы', exact: true }).click();
     const ready = page.locator('#request-' + request.id);
     await ready.locator('summary').click();
@@ -418,6 +430,8 @@ test('dean navigation and library access', async ({ page, cabinet }) => {
   await login(page, cabinet, 'dean');
   const nav = page.locator('.sidebar nav');
   await expect(page.locator('#sidebar-initials')).toHaveText('ИЯ');
+  await expandGroup(nav, 'Сервисы');
+  await expandGroup(nav, 'Учёба');
   await expect(nav.getByRole('link', { name: 'Справки и документы' })).toBeVisible();
   await expect(nav.getByRole('link', { name: 'Расписание' })).toHaveCount(0);
   await nav.getByRole('link', { name: 'Библиотека' }).click();
@@ -427,6 +441,7 @@ test('dean navigation and library access', async ({ page, cabinet }) => {
 
 test('library searches titles and authors, filters disciplines and remembers a favorite', async ({ page, cabinet }) => {
   await login(page, cabinet);
+  await expandGroup(page.locator('.sidebar nav'), 'Учёба');
   await page.locator('.sidebar nav').getByRole('link', { name: 'Библиотека' }).click();
   const query = page.locator('#library-query');
   const books = page.locator('#library-results');
@@ -544,6 +559,10 @@ for (const [label, width, height] of [['desktop', 1440, 980], ['360', 360, 800],
         await tabs.getByRole('link', { name: 'Меню' }).click();
         await expect(dialog).toBeHidden();
       }
+      if (name !== 'Главная' && (width > 680 || !mainTab)) {
+        // Opening a disclosure leaves an open helper alone.
+        await expandGroup(navigation, name === 'Справки и документы' ? 'Сервисы' : 'Учёба');
+      }
       await navigation.getByRole('link', { name, exact: true }).click();
       await expect(page.locator('#page-heading')).toHaveText(name);
       await expect(dialog).toBeHidden();
@@ -575,6 +594,7 @@ test('appeal withdrawal uses one click and keeps the grade, including on failure
   expect(created.ok()).toBe(true);
   const appeal = (await snapshot()).appeals.find(({ submissionId }) => submissionId === graded.submission.id);
   await page.reload();
+  await expandGroup(page.locator('.sidebar nav'), 'Учёба');
   await page.locator('.sidebar nav').getByRole('link', { name: 'Задания' }).click();
   const card = page.locator('#appeal-' + appeal.id);
   await card.locator('summary').click();
@@ -651,6 +671,8 @@ for (const [width, height] of [[768, 1024], [1024, 768], [1440, 980]]) {
     const nav = page.locator('.sidebar nav');
     await expect(nav).toBeVisible();
     await expect(page.locator('.mobile-tabs')).toBeHidden();
+    await expandGroup(nav, 'Учёба');
+    await expandGroup(nav, 'Сервисы');
     await expect(nav.getByRole('link', { name: 'Расписание' })).toBeVisible();
     await expect(page.locator('#header-inbox')).toBeVisible();
     const heading = page.locator('#page-heading');
@@ -688,6 +710,8 @@ for (const [role, unavailable] of [['teacher', 'Справки и докумен
     const tabs = page.locator('.mobile-tabs');
     await expect(tabs.getByRole('link', { name: 'Расписание' })).toHaveCount(0);
     await tabs.getByRole('link', { name: 'Меню' }).click();
+    await expandGroup(page.locator('#mobile-nav'), 'Учёба');
+    await expandGroup(page.locator('#mobile-nav'), 'Сервисы');
     await expect(page.locator('#mobile-nav').getByRole('link', { name: unavailable })).toHaveCount(0);
     await expect(page.locator('#mobile-nav').getByRole('link', { name: 'Библиотека' })).toBeVisible();
     await fits(page);
@@ -712,3 +736,87 @@ test('Chromium loads and applies both responsive stylesheets', async ({ page, ca
   await expect(page.locator('.sidebar')).toHaveCSS('width', '164px');
   await expect(page.locator('.mobile-tabs')).toBeHidden();
 });
+
+for (const width of [360, 440, 768, 1440]) {
+  test(`navigation disclosures and lesson dismissal at ${width} px`, async ({ page, cabinet }) => {
+    const mobile = width < 681;
+    await page.setViewportSize({ width, height: 800 });
+    await login(page, cabinet);
+    const tabs = page.locator('.mobile-tabs');
+    const nav = mobile ? page.locator('#mobile-nav') : page.locator('.sidebar nav');
+    if (mobile) await tabs.getByRole('link', { name: 'Меню' }).click();
+    const groups = ['Учёба', 'Сервисы', 'Кампус'].map((name) => nav.getByRole('button', { name, exact: true }));
+    for (const group of groups) {
+      await expect(group).toHaveAttribute('aria-expanded', 'false');
+      await expect(group).toHaveCSS('cursor', 'pointer');
+    }
+    await page.screenshot({ path: `test-results/navigation/closed-${width}.png` });
+    await groups[0].focus();
+    await page.keyboard.press('Tab');
+    await expect(groups[1]).toBeFocused();
+    await expect(groups[1]).toHaveCSS('outline-style', 'solid');
+    const hash = new URL(page.url()).hash;
+    for (const group of groups) {
+      await group.click();
+      await expect(group).toHaveAttribute('aria-expanded', 'true');
+    }
+    expect(new URL(page.url()).hash).toBe(hash);
+    await page.screenshot({ path: `test-results/navigation/open-${width}.png` });
+    for (const group of groups) {
+      await group.focus();
+      await page.keyboard.press('Space');
+      await expect(group).toHaveAttribute('aria-expanded', 'false');
+      await page.keyboard.press('Enter');
+      await expect(group).toHaveAttribute('aria-expanded', 'true');
+    }
+    const profile = mobile ? tabs.getByRole('link', { name: 'Профиль' }) : page.locator('.sidebar-profile');
+    await groups[0].click();
+    await expect(groups[0]).toHaveAttribute('aria-expanded', 'false');
+    await profile.click();
+    await expect(profile).toHaveAttribute('aria-current', 'page');
+    await page.goto(cabinet.origin + '/#schedule');
+    await expect(nav.getByRole('button', { name: 'Учёба', includeHidden: true })).toHaveAttribute('aria-expanded', 'true');
+    await expect(nav.locator('[data-view=schedule]')).toHaveAttribute('aria-current', 'page');
+
+    if (mobile) await page.locator('#day-picker label').first().click();
+    const lesson = page.locator('#week-grid .lesson-link:visible').first();
+    const dialog = page.locator('#lesson-dialog');
+    for (const action of ['button', 'Escape', 'outside']) {
+      await lesson.scrollIntoViewIfNeeded();
+      const position = await page.evaluate(() => globalThis.scrollY);
+      await lesson.click();
+      await expect(dialog.locator('.lesson-details')).toBeVisible();
+      await dialog.locator('h2').dblclick();
+      await expect(dialog).toBeVisible();
+      if (action === 'button') {
+        await dialog.getByRole('button', { name: /^Скопировать почту/ }).click();
+        await expect(dialog).toBeVisible();
+      }
+      const url = page.url();
+      if (action === 'button') await dialog.getByRole('button', { name: 'Закрыть' }).click();
+      if (action === 'Escape') await page.keyboard.press('Escape');
+      if (action === 'outside') {
+        const target = await profile.boundingBox();
+        const x = target.x + target.width / 2;
+        const y = target.y + target.height / 2;
+        if (width === 440) {
+          const touch = await page.context().newCDPSession(page);
+          await touch.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+          await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+          await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+          await touch.detach();
+        } else {
+          await page.mouse.click(x, y);
+        }
+      }
+      await expect(dialog).toBeHidden();
+      await expect(lesson).toBeFocused();
+      expect(await page.evaluate(() => globalThis.scrollY)).toBe(position);
+      expect(page.url()).toBe(url);
+    }
+    const query = page.getByRole('searchbox', { name: 'Поиск по кабинету' });
+    await query.fill('расп');
+    await expect(page.locator('#search-results')).toContainText('Расписание');
+    await fits(page);
+  });
+}
