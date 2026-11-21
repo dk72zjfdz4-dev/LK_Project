@@ -79,6 +79,9 @@ for (const width of [360, 1440]) {
     await page.screenshot({ path: `test-results/screenshots/seasonal-login-${width}.png`, animations: 'disabled' });
     await page.locator('#login-theme input[value="light"]').check();
     await expect(scene).toHaveAttribute('src', '/assets/auth/winter-day.png');
+    await expect(page.locator('.login-headline')).toHaveCSS('background-color', 'rgba(248, 252, 255, 0.9)');
+    await fits(page);
+    await page.screenshot({ path: `test-results/screenshots/seasonal-login-light-${width}.png`, animations: 'disabled' });
     await page.reload();
     await expect(scene).toHaveAttribute('src', '/assets/auth/winter-day.png');
     await page.getByRole('button', { name: 'Показать пароль' }).click();

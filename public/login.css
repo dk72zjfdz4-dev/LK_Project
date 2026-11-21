@@ -205,6 +205,16 @@
 
 .login-headline span { display: inline-block; color: var(--login-accent); }
 
+.login-layout[data-tone="day"] .login-headline {
+  width: fit-content;
+  padding: .16em .28em .22em;
+  border-radius: 14px;
+  color: #142848;
+  background: rgb(248 252 255 / .9);
+}
+
+.login-layout[data-tone="day"] .login-headline span { color: #204e69; }
+
 .login-panel {
   align-self: center;
   justify-self: end;
