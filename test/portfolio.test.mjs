@@ -9,7 +9,7 @@ import { test } from 'node:test';
 
 test('private portfolio workflows, reviewer scope and exports', { timeout: 30000 }, async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'cabinet-portfolio-'));
-  const passwords = Object.fromEntries(['student1', 'student2', 'teacher1', 'dean1'].map((login) => [login, randomBytes(16).toString('hex')]));
+  const passwords = Object.fromEntries(['student1', 'student2', 'teacher1', 'dekanat1'].map((login) => [login, randomBytes(16).toString('hex')]));
   const dbPath = join(directory, 'test.sqlite');
   let server;
   let origin;
@@ -28,7 +28,7 @@ test('private portfolio workflows, reviewer scope and exports', { timeout: 30000
     server = spawn(process.execPath, ['server.mjs'], {
       env: {
         HOST: '127.0.0.1', PORT: '0', DB_PATH: dbPath, DEMO_PASSWORD_1: passwords.student1,
-        DEMO_PASSWORD_2: passwords.student2, DEMO_PASSWORD_TEACHER: passwords.teacher1, DEMO_PASSWORD_DEAN: passwords.dean1,
+        DEMO_PASSWORD_2: passwords.student2, DEMO_PASSWORD_TEACHER: passwords.teacher1, DEMO_PASSWORD_DEAN: passwords.dekanat1,
       },
     });
     origin = await new Promise((resolve, reject) => {
@@ -68,7 +68,7 @@ test('private portfolio workflows, reviewer scope and exports', { timeout: 30000
   const student = await login('student1');
   const other = await login('student2');
   const teacher = await login('teacher1');
-  const dean = await login('dean1');
+  const dean = await login('dekanat1');
   const base = '/portfolio';
   const snapshot = (cookie) => json(base, cookie);
   const scope = await snapshot(student);

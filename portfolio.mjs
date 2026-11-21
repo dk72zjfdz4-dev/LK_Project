@@ -14,7 +14,7 @@ export function migratePortfolio(db) {
       PRIMARY KEY (dean_id, student_group)
     ) STRICT;
     INSERT INTO portfolio_dean_groups (dean_id, student_group)
-      SELECT id, 'МО-24-02' FROM students WHERE login = 'dean1' AND role = 'dean';
+      SELECT id, 'МО-24-02' FROM students WHERE login = 'dekanat1' AND role = 'dean';
 
     CREATE TABLE portfolio_achievements (
       id INTEGER PRIMARY KEY,

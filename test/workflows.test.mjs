@@ -10,7 +10,7 @@ import { test } from 'node:test';
 
 test('roles, applications, replies, grading, appeals and persistence', { timeout: 30000 }, async (t) => {
   const folder = await mkdtemp(join(tmpdir(), 'cabinet-workflows-'));
-  const accounts = { student1: '1', student2: '2', teacher1: 'TEACHER', dean1: 'DEAN' };
+  const accounts = { student1: '1', student2: '2', teacher1: 'TEACHER', dekanat1: 'DEAN' };
   const passwords = Object.fromEntries(Object.keys(accounts).map((login) => [login, randomBytes(20).toString('base64url')]));
   const env = { ...process.env, HOST: '127.0.0.1', PORT: '0', DB_PATH: join(folder, 'test.sqlite') };
   for (const [login, slot] of Object.entries(accounts)) env['DEMO_PASSWORD_' + slot] = passwords[login];
@@ -71,14 +71,14 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
     assert.equal(response.status, 200, name);
     const { profile } = await response.json();
     assert.equal(profile.role, role);
-    const initials = { student1: 'НР', student2: 'КР', teacher1: 'СС', dean1: 'ИЯ' };
+    const initials = { student1: 'НР', student2: 'КР', teacher1: 'СС', dekanat1: 'ИЯ' };
     assert.equal(profile.firstName[0] + profile.lastName[0], initials[name]);
     return response.headers.get('set-cookie').split(';')[0];
   };
   const student = await login('student1', 'student');
   const other = await login('student2', 'student');
   const teacher = await login('teacher1', 'teacher');
-  const dean = await login('dean1', 'dean');
+  const dean = await login('dekanat1', 'dean');
   const cabinet = (cookie) => expect('/cabinet', cookie);
   const initial = await cabinet(student);
   await expect('/library', null, undefined, 401);
@@ -324,6 +324,7 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   await stop();
   const legacyDb = new DatabaseSync(env.DB_PATH);
   legacyDb.exec(`
+    UPDATE students SET login = 'dean1' WHERE login = 'dekanat1';
     UPDATE lessons SET teacher = 'Прежний преподаватель';
     UPDATE students SET full_name = 'Мария Ланская' WHERE login = 'teacher1';
     UPDATE students SET full_name = 'Даниил Андреевич Речин' WHERE login = 'student2';
@@ -333,6 +334,9 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   `);
   legacyDb.close();
   await start();
+  await expect('/login', null, { login: 'dean1', password: passwords.dekanat1 }, 401);
+  await login('dekanat1', 'dean');
+  assert.equal((await expect('/me', dean)).profile.role, 'dean');
   const expectedTeachers = new Map([
     ['Астрономия', 'Аврора Синистра'],
     ['Заклинания', 'Филиус Флитвик'],

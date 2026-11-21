@@ -48,7 +48,7 @@ const test = base.extend({
 
 async function login(page, cabinet, role = 'student') {
   await page.goto(cabinet.origin);
-  await page.getByLabel('Логин', { exact: true }).fill({ student: 'student1', other: 'student2', teacher: 'teacher1', dean: 'dean1' }[role]);
+  await page.getByLabel('Логин', { exact: true }).fill({ student: 'student1', other: 'student2', teacher: 'teacher1', dean: 'dekanat1' }[role]);
   await page.getByLabel('Пароль', { exact: true }).fill(cabinet[role]);
   await page.getByRole('button', { name: 'Войти', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Главная', exact: true })).toBeVisible();

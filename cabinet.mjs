@@ -205,7 +205,7 @@ function demoPdf() {
 function seedCabinetFixtures(db) {
   const account = db.prepare('SELECT id FROM students WHERE login = ?');
   const teacherId = account.get('teacher1').id;
-  const deanId = account.get('dean1').id;
+  const deanId = account.get('dekanat1').id;
   const rename = db.prepare('UPDATE students SET full_name = ? WHERE id = ?');
   const changeLesson = db.prepare('UPDATE lessons SET title = ?, teacher = ? WHERE student_id = ? AND title = ?');
   const enroll = db.prepare(`

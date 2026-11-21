@@ -86,7 +86,7 @@ const demos = [
     lessons: [],
   },
   {
-    login: 'dean1',
+    login: 'dekanat1',
     firstName: 'Ирина',
     lastName: 'Яровая',
     passwordEnv: 'DEMO_PASSWORD_DEAN',
@@ -233,6 +233,7 @@ function seedDemos(reset = false) {
   const revokeSessions = db.prepare('DELETE FROM sessions WHERE student_id = ?');
   const generated = [];
   transaction(() => {
+    db.prepare("UPDATE students SET login = ? WHERE login = ? AND role = 'dean'").run('dekanat1', 'dean1');
     for (const demo of demos) {
       const student = studentByLogin.get(demo.login);
       if (student && !reset) continue;
