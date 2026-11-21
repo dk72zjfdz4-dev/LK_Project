@@ -67,7 +67,7 @@ async function capture(page, name) {
   await page.screenshot({ path: `test-results/screenshots/${name}-360.png`, animations: 'disabled' });
 }
 
-for (const width of [360, 1440]) {
+for (const width of [360, 741, 1440]) {
   test(`seasonal login at ${width} px`, async ({ page, cabinet }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.clock.setFixedTime(new Date('2026-11-21T16:00:00Z'));
@@ -81,6 +81,14 @@ for (const width of [360, 1440]) {
     await expect(scene).toHaveAttribute('src', '/assets/auth/winter-day.png');
     const headline = page.locator('.login-header .login-headline');
     await expect(headline).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    const slogan = headline.locator('.login-headline-text');
+    await expect(slogan).toHaveText('Твоя университетская жизнь — ближе!');
+    await expect(slogan).toHaveCSS('white-space', 'nowrap');
+    const sloganBox = await slogan.boundingBox();
+    const headlineBox = await headline.boundingBox();
+    const brandBox = await page.locator('.login-brand').boundingBox();
+    expect(sloganBox.x).toBeGreaterThan(brandBox.x + brandBox.width);
+    expect(sloganBox.x + sloganBox.width).toBeLessThanOrEqual(headlineBox.x + headlineBox.width);
     await fits(page);
     await page.screenshot({ path: `test-results/screenshots/seasonal-login-light-${width}.png`, animations: 'disabled' });
     await page.reload();
