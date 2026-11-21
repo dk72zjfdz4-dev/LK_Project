@@ -76,6 +76,10 @@ for (const width of [360, 390, 440]) {
     expect((await avatar.boundingBox()).x).toBeLessThan(32);
     await expect(page.getByRole('heading', { name: 'Учебная неделя' })).toBeVisible();
     await fits(page);
+    await expect(page.locator('#stat-assignments')).toBeVisible();
+    await expect(page.locator('#stat-requests')).toBeVisible();
+    await expect(page.locator('#stat-messages')).toHaveCount(0);
+    await expect(page.locator('#header-inbox [data-unread]')).toBeVisible();
     if (width === 360) await capture(page, 'home');
     await page.locator('#home-week').locator('label').first().click();
     await expect(page.locator('#home-day')).toContainText(/зельеварение|заклинания/i);
@@ -118,10 +122,53 @@ for (const width of [360, 390, 440]) {
   });
 }
 
+for (const width of [360, 1440]) {
+  test(`month schedule at ${width} px`, async ({ page, cabinet }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await login(page, cabinet);
+    const nav = width === 360 ? page.locator('.mobile-tabs') : page.locator('.sidebar nav');
+    if (width !== 360) await expandGroup(nav, 'Учёба');
+    await nav.getByRole('link', { name: 'Расписание', exact: true }).click();
+    await expect(page.locator('#week-grid')).toBeVisible();
+    await page.getByRole('button', { name: 'Месяц', exact: true }).click();
+    const month = page.getByLabel('Месяц расписания', { exact: true });
+    const grid = page.locator('#month-grid');
+    await month.selectOption('2026-11');
+    await expect(grid.locator('.month-cell')).toHaveCount(30);
+    const changedDay = grid.getByRole('button', { name: /, 24 ноября,.*есть изменения/ });
+    await expect(changedDay.locator('..')).toHaveClass(/month-changed/);
+    for (const date of [3, 4, 10, 11, 17, 18, 19]) {
+      await expect(grid.getByRole('button', { name: new RegExp(', ' + date + ' ноября,') }).locator('..'))
+        .not.toHaveClass(/month-changed/);
+    }
+    await changedDay.click();
+    await expect(changedDay).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#month-day')).toContainText('Аудитория изменена.');
+    await expect(page.locator('#month-day .change-label')).toBeVisible();
+    const cancelledDay = grid.getByRole('button', { name: /, 26 ноября,.*есть изменения/ });
+    await cancelledDay.click();
+    await expect(page.locator('#month-day .change-label')).toHaveText('Занятие отменено.');
+    await month.selectOption('2026-12');
+    await expect(grid.locator('.month-cell')).toHaveCount(31);
+    await expect(page.locator('#week-grid')).toBeHidden();
+    await fits(page);
+    await page.screenshot({ path: `test-results/screenshots/schedule-month-${width}.png`, animations: 'disabled' });
+    if (width === 360) await grid.getByRole('button', { name: /1 декабря,/ }).first().click();
+    const lesson = (width === 360 ? page.locator('#month-day') : grid).locator('.lesson-link').first();
+    await lesson.click();
+    await expect(page.locator('#lesson-dialog')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(lesson).toBeFocused();
+    await page.getByRole('button', { name: 'Неделя', exact: true }).click();
+    await expect(page.locator('#week-grid')).toBeVisible();
+    await expect(grid).toBeHidden();
+  });
+}
+
 test('teacher login and role-specific navigation', async ({ page, cabinet }) => {
   await login(page, cabinet, 'teacher');
   const navigation = page.locator('.sidebar nav');
-  await expect(page.locator('#sidebar-initials')).toHaveText('МЛ');
+  await expect(page.locator('#sidebar-initials')).toHaveText('СС');
   await expandGroup(navigation, 'Учёба');
   await expect(navigation.getByRole('link', { name: 'Задания' })).toBeVisible();
   await expect(navigation.getByRole('link', { name: 'Справки и документы' })).toHaveCount(0);
@@ -158,6 +205,8 @@ for (const width of [360, 440, 1440]) {
   test(`messenger layout, independent drafts and emoji at ${width} px`, async ({ page, cabinet }) => {
     await page.setViewportSize({ width, height: width === 440 ? 450 : 820 });
     await login(page, cabinet);
+    const launcher = page.locator('#help-launcher');
+    const homePosition = await launcher.boundingBox();
     await page.locator('#header-inbox').click();
     await expect(page.locator('.mobile-header .brand [aria-hidden="true"]')).toHaveText('ЛК');
     const search = page.getByRole('searchbox', { name: 'Поиск диалогов' });
@@ -170,12 +219,30 @@ for (const width of [360, 440, 1440]) {
     await contact.click();
     const composer = page.getByRole('textbox', { name: 'Сообщение', exact: true });
     await expect(composer).toBeInViewport();
+    const send = page.locator('#message-submit');
+    await expect(send).toBeDisabled();
+    await expect(send).toHaveCSS('cursor', 'default');
+    await expect(launcher).toBeInViewport();
+    expect(await launcher.boundingBox()).toEqual(homePosition);
+    await page.evaluate(() => globalThis.scrollTo(0, globalThis.document.documentElement.scrollHeight));
+    expect(await launcher.boundingBox()).toEqual(homePosition);
+    await page.evaluate(() => globalThis.scrollTo(0, 0));
     if (width === 360) {
       await composer.fill('Добрый день! Подскажите, пожалуйста, статус справки.');
       await composer.press('Enter');
       await expect(composer).toHaveValue('');
     }
     await composer.fill('Привет мир');
+    await expect(composer).toHaveCSS('outline-style', 'none');
+    await expect(launcher).toBeInViewport();
+    await expect(page.locator('.help-dock')).toHaveCSS('position', 'fixed');
+    await page.locator('#message-submit').click({ trial: true });
+    await launcher.click();
+    const helper = page.locator('#help-dialog');
+    await expect(helper).toBeVisible();
+    await helper.getByRole('button', { name: 'Закрыть помощника' }).click();
+    await expect(launcher).toBeFocused();
+    await expect(composer).toHaveValue('Привет мир');
     await composer.press('Home');
     await composer.press('ArrowRight');
     await page.getByRole('button', { name: 'Эмодзи', exact: true }).click();
@@ -193,22 +260,60 @@ for (const width of [360, 440, 1440]) {
       await expect(composer).toHaveValue('П🙂ривет мир');
     } else {
       await expect(search).toBeVisible();
+      const contactInfo = page.locator('#dialogue-info');
+      await contactInfo.getByText('Контакты', { exact: true }).click();
+      await expect(contactInfo.getByText('dean-office@example.com', { exact: true })).toBeVisible();
+      await expect(contactInfo.getByRole('link', { name: 'Открыть почту' })).toHaveAttribute('href', 'mailto:dean-office@example.com');
+      await page.getByRole('button', { name: 'Назад к диалогам' }).click();
+      await expect(page.locator('#dialogue-heading')).toHaveText('Переписка');
+      await expect(page.getByText('Выберите диалог.', { exact: true })).toBeVisible();
+      await expect(composer).toBeHidden();
+      await expect(contact).toBeFocused();
       await search.fill('');
       await page.locator('#dialogues-content button').filter({ hasNotText: 'Деканат' }).first().click();
       await expect(composer).toHaveValue('');
+      await page.locator('#dialogue-info').getByText('Контакты', { exact: true }).click();
+      const details = page.locator('#dialogue-contact');
+      await expect(details.getByText('Северус Снегг', { exact: true })).toHaveCount(1);
+      await expect(details.getByRole('link', { name: 'Открыть почту' })).toBeVisible();
       await contact.click();
       await expect(composer).toHaveValue('П🙂ривет мир');
     }
   });
 }
 
-test('new conversation shows only authorized contacts without history', async ({ page, cabinet }) => {
+test('new conversation restores the search and opens a teacher contact', async ({ page, cabinet }) => {
   await login(page, cabinet, 'other');
   await page.locator('#header-inbox').click();
   const entries = page.locator('#dialogues-content button');
   await expect(entries).toHaveCount(1);
   await expect(entries.first()).toContainText('Деканат');
-  await page.getByRole('button', { name: 'Новый диалог' }).click();
+  const search = page.locator('#dialogue-search');
+  const create = page.getByRole('button', { name: 'Новый диалог' });
+  const tooltip = page.locator('#dialogue-new-tooltip');
+  await search.fill('дека');
+  await create.hover();
+  await expect(tooltip).toBeVisible();
+  await create.click();
+  const back = page.locator('.dialogue-panel').getByRole('button', { name: 'Назад к диалогам' });
+  await expect(back).toBeFocused();
+  await expect(tooltip).toHaveText('Назад к диалогам');
+  await page.locator('#dialogues-heading').hover();
+  await expect(tooltip).toBeHidden();
+  await page.keyboard.press('Tab');
+  await expect(search).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(back).toBeFocused();
+  await expect(tooltip).toBeVisible();
+  await expect(search).toHaveValue('');
+  await back.press('Enter');
+  await expect(create).toBeFocused();
+  await expect(search).toHaveValue('дека');
+  await expect(entries.first()).toContainText('Деканат');
+  await search.clear();
+  await create.click();
+  await page.getByLabel('Категория контактов').selectOption('teacher');
+  await search.fill('Снегг');
   await expect(entries).toHaveCount(1);
   await expect(entries.first()).toContainText('Преподаватель');
   await entries.first().click();
@@ -218,6 +323,54 @@ test('new conversation shows only authorized contacts without history', async ({
   await expect(composer).toHaveValue('');
   await expect(entries).toHaveCount(2);
   await expect(entries.first()).toContainText('Вы: Первый вопрос преподавателю');
+});
+
+test('student finds contacts by category and opens a teacher conversation', async ({ page, cabinet }) => {
+  await page.setViewportSize({ width: 360, height: 800 });
+  await login(page, cabinet);
+  await page.locator('.mobile-tabs [data-view=messages]').click();
+  await page.getByRole('button', { name: 'Новый диалог' }).click();
+  const category = page.getByLabel('Категория контактов');
+  const search = page.locator('#dialogue-search');
+  const entries = page.locator('#dialogues-content button');
+  for (const [role, query, name] of [
+    ['student', 'Речин', 'Крош Речин'],
+    ['student', 'Ёжик', 'Ёжик Иголкин'],
+    ['dean', 'Деканат', 'Деканат'],
+    ['teacher', 'Снегг', 'Северус Снегг'],
+    ['teacher', 'Флитвик', 'Филиус Флитвик'],
+    ['teacher', 'Стебль', 'Помона Стебль'],
+    ['teacher', 'Синистра', 'Аврора Синистра'],
+    ['teacher', 'Макгонагалл', 'Минерва Макгонагалл'],
+    ['teacher', 'Люпин', 'Римус Люпин'],
+  ]) {
+    await category.selectOption(role);
+    await search.fill(query);
+    await expect(entries).toHaveCount(1);
+    await expect(entries.first()).toContainText(name);
+  }
+  await fits(page);
+  await entries.first().click();
+  await expect(page.locator('#dialogue-heading')).toHaveText('Римус Люпин');
+  await expect(page.locator('#message-text')).toBeVisible();
+});
+
+test('teacher can search all categories and start a conversation with the dean’s office', async ({ page, cabinet }) => {
+  await login(page, cabinet, 'teacher');
+  await page.locator('#header-inbox').click();
+  await page.getByRole('button', { name: 'Новый диалог' }).click();
+  const category = page.getByLabel('Категория контактов');
+  const search = page.locator('#dialogue-search');
+  const entries = page.locator('#dialogues-content button');
+  for (const [role, query] of [['student', 'Речин'], ['teacher', 'Макгонагалл'], ['dean', 'Деканат']]) {
+    await category.selectOption(role);
+    await search.fill(query);
+    await expect(entries).toHaveCount(1);
+    await expect(entries.first()).toContainText(query);
+  }
+  await entries.first().click();
+  await expect(page.locator('#dialogue-heading')).toHaveText('Деканат');
+  await expect(page.locator('#message-text')).toBeVisible();
 });
 
 test('message receipt visibility and retry after lost response in independent sessions', async ({ page, browser, cabinet }) => {
@@ -267,6 +420,9 @@ test('message receipt visibility and retry after lost response in independent se
     await receiverRow.scrollIntoViewIfNeeded();
     await expect(receiverRow).toBeInViewport();
     await expect(row.getByRole('img', { name: 'Прочитано', exact: true })).toBeVisible({ timeout: 15000 });
+    const readReceipt = row.getByRole('img', { name: 'Прочитано', exact: true });
+    await expect(readReceipt).toHaveCSS('color', 'rgb(36, 118, 61)');
+    await expect(readReceipt.locator('svg path')).toHaveCount(1);
     await expect(dean.locator('#message-text')).toBeInViewport();
     const history = dean.locator('#messages-content');
     const scrollPosition = await history.evaluate((node) => node.scrollTop);
@@ -293,10 +449,10 @@ for (const width of [360, 440]) {
       headers: { Origin: cabinet.origin }, data: body,
     });
     const current = await data('/cabinet');
-    const teacher = current.contacts.find(({ teacherId }) => teacherId !== null);
     const schedule = await data('/schedule');
-    const lesson = schedule.lessons.find(({ contact }) => contact?.teacherId === teacher.teacherId);
+    const lesson = schedule.lessons.find(({ contact }) => Number.isSafeInteger(contact?.teacherId));
     expect(lesson).toBeDefined();
+    const teacher = current.contacts.find(({ teacherId }) => teacherId === lesson.contact.teacherId);
     await page.locator('.mobile-tabs [data-view=schedule]').click();
     await page.locator('#day-picker label').filter({ has: page.locator('input[value="' + lesson.date + '"]') }).click();
     await page.locator('#lesson-' + lesson.id + ' .lesson-link').click();
@@ -328,19 +484,27 @@ for (const width of [360, 440]) {
     await menu.click();
     await expandGroup(page.locator('#mobile-nav'), 'Учёба');
     await page.locator('#view-menu').getByRole('link', { name: 'Успеваемость', exact: true }).click();
-    const semester = page.getByRole('combobox', { name: 'Семестр' });
-    const subject = page.locator('#grades-content details').filter({ hasText: 'Зельеварение' });
-    const summary = subject.locator('summary');
+    await expect(page.getByRole('combobox', { name: 'Семестр' })).toHaveCount(0);
+    const currentSemester = page.locator('#grade-semester-2');
+    const previous = page.locator('#grade-semester-1');
+    await expect(currentSemester).toHaveJSProperty('open', true);
+    await expect(previous).toHaveJSProperty('open', false);
+    const subject = currentSemester.locator('details.grade').filter({ hasText: 'Зельеварение' });
+    const summary = subject.locator(':scope > summary');
     await expect(summary).toContainText('48 / 100');
-    await expect(summary).toContainText(/Зачёт|Экзамен/);
-    await summary.click();
+    await expect(subject.getByText('Экзамен', { exact: true })).toBeVisible();
+    await subject.getByText('Из чего складываются баллы', { exact: true }).click();
     await expect(subject).toContainText('36 / 40');
     await expect(subject).toContainText('12 / 15');
     await expect(subject.getByRole('link', { name: 'Разбор рецепта' }).first()).toBeVisible();
     await fits(page);
-    await semester.selectOption('1');
-    await expect(summary).toContainText(/Зачтено|Отлично|Хорошо/);
-    await semester.selectOption('2');
+    const previousGrade = previous.locator('details.grade').filter({ hasText: 'Зельеварение' });
+    const previousId = await previousGrade.getAttribute('id');
+    await page.evaluate((id) => { globalThis.location.hash = '#grades/' + id; }, previousId);
+    await expect(previous).toHaveJSProperty('open', true);
+    await expect(previousGrade).toHaveJSProperty('open', true);
+    await expect(previousGrade.getByText(/^(Отлично|Хорошо)$/)).toBeVisible();
+    await expect(currentSemester).toHaveJSProperty('open', true);
 
     const submitted = await post(page.request, '/requests', { type: 'Справка об обучении' });
     expect(submitted.ok()).toBe(true);
@@ -522,10 +686,20 @@ for (const [label, width, height] of [['desktop', 1440, 980], ['360', 360, 800],
         await expect(options.first()).toContainText(/статус/i);
       }
     }
-    for (const value of ['', 'с', 'зюзюкалка']) {
+    for (const value of ['', 'ъ', 'зюзюкалка']) {
       await input.fill(value);
       await expect(options).toHaveCount(0);
     }
+    for (const [letter, pattern] of [['Г', /(?:^|\s)г/iu], ['р', /(?:^|\s)р/iu]]) {
+      await input.fill(letter);
+      await expect(options.first()).toBeVisible();
+      for (const item of await options.allTextContents()) expect(item).toMatch(pattern);
+    }
+    await expect(dialog.getByRole('option', { name: 'Где посмотреть расписание?' })).toBeVisible();
+    await input.fill('ра');
+    await expect(options.first()).toContainText(/расписан/i);
+    for (const item of await options.allTextContents()) expect(item).toMatch(/(?:^|\s)ра/i);
+    await expect(dialog.getByRole('option', { name: 'Где найти задания?' })).toHaveCount(0);
     await input.fill('расп');
     await expect(options.first()).toContainText(/расписан/i);
     for (const item of await options.allTextContents()) expect(item).toMatch(/расписан/i);
@@ -676,15 +850,39 @@ for (const [width, height] of [[768, 1024], [1024, 768], [1440, 980]]) {
     await expect(nav.getByRole('link', { name: 'Расписание' })).toBeVisible();
     await expect(page.locator('#header-inbox')).toBeVisible();
     const heading = page.locator('#page-heading');
+    await nav.getByRole('link', { name: 'Успеваемость' }).click();
+    await expect(page.locator('.grade-stats')).toContainText('Средний балл');
+    await expect(page.locator('#grade-semester-2')).toHaveJSProperty('open', true);
+    const previous = page.locator('#grade-semester-1');
+    await expect(previous).toHaveJSProperty('open', false);
+    await fits(page);
+    if (width === 1440) {
+      await page.screenshot({ path: 'test-results/screenshots/grades-1440.png', animations: 'disabled' });
+    }
+    await previous.locator(':scope > summary').click();
+    await expect(previous).toHaveJSProperty('open', true);
     for (const [view, name, selector] of [['schedule', 'Расписание', '#week-grid'], ['requests', 'Справки и документы', '#document-enrollment'], ['messages', 'Сообщения', '#dialogues-content']]) {
       await nav.locator('[data-view="' + view + '"]').click();
       await expect(heading).toHaveText(name);
       await expect(page.locator(selector)).toBeVisible();
       await expect(page.locator('#header-inbox')).toBeHidden();
+      if (view === 'schedule') {
+        await expect(nav.locator('[data-view="schedule"]')).toHaveCSS('caret-color', 'rgba(0, 0, 0, 0)');
+        await expect(page.locator('.search-submit')).toHaveCSS('caret-color', 'rgba(0, 0, 0, 0)');
+        const search = page.locator('#search-query');
+        await expect(search).not.toHaveCSS('caret-color', 'rgba(0, 0, 0, 0)');
+        await page.locator('.search-field').click({ position: { x: 1, y: 20 } });
+        await expect(page.locator('.search-submit')).toBeFocused();
+        await expect(search).not.toBeFocused();
+        await expect(heading).toHaveCSS('caret-color', 'rgba(0, 0, 0, 0)');
+        await heading.dblclick();
+        await expect.poll(() => page.evaluate(() => globalThis.getSelection().toString())).toBe('Расписание');
+      }
       await fits(page);
     }
     await page.getByRole('button', { name: /Деканат/ }).click();
     await expect(page.locator('#message-text')).toBeVisible();
+    await expect(page.locator('#message-text')).not.toHaveCSS('caret-color', 'rgba(0, 0, 0, 0)');
     await fits(page);
     await nav.getByRole('link', { name: 'Главная' }).click();
     await page.screenshot({ path: `test-results/screenshots/home-${width}.png`, animations: 'disabled' });
@@ -848,7 +1046,7 @@ for (const width of [360, 440]) {
     await item.locator('form[id^="portfolio-achievement-file-"] button[type=submit]').click();
     await expect(item.getByRole('link', { name: /demo.png/ })).toBeVisible();
     const submit = item.locator('form[id^="portfolio-achievement-submit-"]');
-    await submit.locator('[name=reviewerId]').selectOption({ label: 'Мария Ланская' });
+    await submit.locator('[name=reviewerId]').selectOption({ label: 'Северус Снегг' });
     await submit.locator('button[type=submit]').click();
     await expect(item.locator(':scope > summary')).toContainText('На проверке');
     const id = (await item.getAttribute('id')).split('-').at(-1);
@@ -869,7 +1067,7 @@ for (const width of [360, 440]) {
     await portfolio.getByText('Запросить рекомендацию', { exact: true }).first().click();
     const recommendation = portfolio.locator('#portfolio-new-recommendation');
     const goal = 'Демонстрационный исследовательский отбор ' + width;
-    await recommendation.locator('[name=teacherId]').selectOption({ label: 'Мария Ланская' });
+    await recommendation.locator('[name=teacherId]').selectOption({ label: 'Северус Снегг' });
     await recommendation.locator('[name=goal]').fill(goal);
     await recommendation.locator('[name=context]').fill('Учебный макет обсерватории');
     await recommendation.locator('[name=deadline]').fill(new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10));

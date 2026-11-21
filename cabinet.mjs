@@ -7,14 +7,17 @@ const PDF = 'application/pdf';
 const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const maxUpload = 10 * 1024 * 1024;
 const currentSemester = 2;
+const practiceReportTitle = 'Отчёт по практикуму';
+const practiceReportDescription = 'Сопоставьте ожидаемый и фактический результаты и объясните расхождения.';
+const practiceReportDeadline = '2026-12-20T20:59:59.000Z';
 
 const demoTeacherIds = new Map([
-  ['Мария Ланская', 'maria-lanskaya'],
-  ['Павел Вересов', 'pavel-veresov'],
-  ['Ольга Листова', 'olga-listova'],
-  ['Кира Волина', 'kira-volina'],
-  ['Лидия Ольшина', 'lidia-olshina'],
-  ['Сергей Вельский', 'sergey-velsky'],
+  ['Северус Снегг', 'severus-snape'],
+  ['Минерва Макгонагалл', 'minerva-mcgonagall'],
+  ['Филиус Флитвик', 'filius-flitwick'],
+  ['Помона Стебль', 'pomona-sprout'],
+  ['Аврора Синистра', 'aurora-sinistra'],
+  ['Римус Люпин', 'remus-lupin'],
 ]);
 
 function demoContact(name) {
@@ -28,13 +31,26 @@ function teacherContact({ id: teacherId, login, name }) {
   return { ...(demo ?? { id, name, email: `${id}@example.com` }), teacherId };
 }
 
+function dialogueContact(dialogue, viewerRole, teacherLogin) {
+  const { partnerId, partnerRole, fullName } = dialogue;
+  if (partnerRole === 'teacher') return teacherContact({ id: partnerId, login: teacherLogin, name: fullName });
+  if (partnerRole === 'dean') {
+    return { id: `dean-${partnerId}`, name: 'Деканат', email: 'dean-office@example.com', teacherId: null };
+  }
+  if (partnerRole === 'student' && (viewerRole === 'teacher' || viewerRole === 'dean')) {
+    const id = `student-${partnerId}`;
+    return { id, name: fullName, email: `${id}@example.com`, teacherId: null };
+  }
+  return null;
+}
+
 const subjects = [
-  ['Зельеварение', 'Мария Ланская', 'Экзамен', 'Техника приготовления, точность измерений и оформление наблюдений.'],
-  ['Трансфигурация', 'Павел Вересов', 'Зачёт', 'Точность преобразования и соблюдение последовательности действий.'],
-  ['Заклинания', 'Ольга Листова', 'Экзамен', 'Точность произношения, исполнение и объяснение результата.'],
-  ['Травология', 'Кира Волина', 'Зачёт', 'Определение видов, описание свойств и оформление полевых заметок.'],
-  ['Астрономия', 'Лидия Ольшина', 'Зачёт', 'Точность наблюдений, расчёты и полнота отчёта.'],
-  ['Защита от тёмных искусств', 'Сергей Вельский', 'Экзамен', 'Выбор защитного приёма, исполнение и обоснование решения.'],
+  ['Зельеварение', 'Северус Снегг', 'Экзамен', 'Техника приготовления, точность измерений и оформление наблюдений.'],
+  ['Трансфигурация', 'Минерва Макгонагалл', 'Зачёт', 'Точность преобразования и соблюдение последовательности действий.'],
+  ['Заклинания', 'Филиус Флитвик', 'Экзамен', 'Точность произношения, исполнение и объяснение результата.'],
+  ['Травология', 'Помона Стебль', 'Зачёт', 'Определение видов, описание свойств и оформление полевых заметок.'],
+  ['Астрономия', 'Аврора Синистра', 'Зачёт', 'Точность наблюдений, расчёты и полнота отчёта.'],
+  ['Защита от тёмных искусств', 'Римус Люпин', 'Экзамен', 'Выбор защитного приёма, исполнение и обоснование решения.'],
 ];
 
 const studentFixtures = [
@@ -52,7 +68,7 @@ const studentFixtures = [
   },
   {
     login: 'student2',
-    name: 'Даниил Андреевич Речин',
+    name: 'Крош Андреевич Речин',
     titles: [
       ['Эконометрика'],
       ['Международные финансы'],
@@ -159,6 +175,9 @@ export function installCabinet(db) {
       PRIMARY KEY (lesson_id, date)
     ) STRICT;
   `);
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('students') WHERE name = 'directory_only'").get()) {
+    db.exec('ALTER TABLE students ADD COLUMN directory_only INTEGER NOT NULL DEFAULT 0 CHECK (directory_only IN (0, 1))');
+  }
 }
 
 function demoPdf() {
@@ -232,8 +251,7 @@ function seedCabinetFixtures(db) {
           'Последовательность описана верно. Уточните, чем подтверждается вывод.');
         assignment.run(enrollmentId, index === 0 ? 'Разбор рецепта' : 'Таблица свойств ингредиентов',
           'Приведите ход работы и объясните, как свойства ингредиентов влияют на результат.', deadline(index + 1), 25);
-        assignment.run(enrollmentId, 'Отчёт по практикуму',
-          'Сопоставьте ожидаемый и фактический результаты и объясните расхождения.', deadline(index + 3), 20);
+        assignment.run(enrollmentId, practiceReportTitle, practiceReportDescription, practiceReportDeadline, 20);
       }
     }
     const { lastInsertRowid: deanDialogue } = makeDialogue.run(studentId, deanId);
@@ -249,25 +267,27 @@ function seedCabinetFixtures(db) {
   }
 }
 
-function seedLessonCancellation(db, { today, monday }) {
-  const todayWeekday = new Date(`${today}T00:00:00Z`).getUTCDay() || 7;
-  const nextLesson = db.prepare(`
-    SELECT l.id, l.student_id, l.title, l.start_time, l.weekday FROM lessons l
-    JOIN students s ON s.id = l.student_id WHERE s.login = 'student1'
-    ORDER BY l.weekday <= ?, l.weekday, l.start_time, l.id LIMIT 1
-  `).get(todayWeekday);
-  if (nextLesson) {
-    const lessonDate = new Date(monday);
-    const offset = nextLesson.weekday <= todayWeekday ? 7 : 0;
-    lessonDate.setUTCDate(lessonDate.getUTCDate() + nextLesson.weekday - 1 + offset);
-    const date = lessonDate.toISOString().slice(0, 10);
-    const displayDate = date.split('-').reverse().join('.');
-    db.prepare('INSERT INTO lesson_cancellations (lesson_id, date, change) VALUES (?, ?, ?)')
-      .run(nextLesson.id, date, 'Занятие отменено.');
-    db.prepare('INSERT INTO notifications (account_id, title, text, created_at) VALUES (?, ?, ?, ?)')
-      .run(nextLesson.student_id, 'Занятие отменено',
-        `${nextLesson.title} · ${displayDate} · ${nextLesson.start_time}.`, new Date().toISOString());
-  }
+function setNovemberCancellation(db) {
+  const lesson = db.prepare(`
+    SELECT l.id, l.student_id FROM lessons l JOIN students s ON s.id = l.student_id
+    WHERE s.login = 'student1' AND l.weekday = 4 AND l.start_time = '10:40' AND l.title = 'Зельеварение'
+  `).get();
+  if (!lesson) return;
+  db.prepare("DELETE FROM lesson_cancellations WHERE lesson_id = ? AND date = '2026-11-19'").run(lesson.id);
+  db.prepare(`
+    INSERT INTO lesson_cancellations (lesson_id, date, change)
+    VALUES (?, '2026-11-26', 'Занятие отменено.') ON CONFLICT(lesson_id, date) DO NOTHING
+  `).run(lesson.id);
+  const title = 'Занятие отменено';
+  const text = 'Зельеварение · 26.11.2026 · 10:40.';
+  db.prepare('UPDATE notifications SET text = ? WHERE account_id = ? AND title = ? AND text = ?')
+    .run(text, lesson.student_id, title, 'Зельеварение · 19.11.2026 · 10:40.');
+  db.prepare(`
+    INSERT INTO notifications (account_id, title, text, created_at)
+    SELECT ?, ?, ?, ? WHERE NOT EXISTS (
+      SELECT 1 FROM notifications WHERE account_id = ? AND title = ? AND text = ?
+    )
+  `).run(lesson.student_id, title, text, new Date().toISOString(), lesson.student_id, title, text);
 }
 
 function migrateAppeals(db) {
@@ -315,10 +335,9 @@ const libraryBooks = [
   ['Практика защитных чар', 'Виктор Вересин', 'Защита от тёмных искусств', 'Разбор вымышленных учебных ситуаций.'],
 ].map(([title, author, subject, description], index) => ({ id: index + 1, title, author, subject, description }));
 
-export function seedCabinet(db, week) {
+export function seedCabinet(db) {
   const version = db.prepare('PRAGMA user_version').get().user_version;
   if (version < 2) seedCabinetFixtures(db);
-  if (version < 3) seedLessonCancellation(db, week);
   if (version < 4) migrateAppeals(db);
   if (version < 5) db.exec(`
     CREATE TABLE library_favorites (
@@ -341,6 +360,52 @@ export function seedCabinet(db, week) {
     PRAGMA user_version = 6;
   `);
   if (version < 7) migratePortfolio(db);
+  if (version < 8) {
+    const renameTeacher = db.prepare("UPDATE students SET full_name = ? WHERE login = 'teacher1' AND role = 'teacher'");
+    const updateLessons = db.prepare(`
+      UPDATE lessons SET teacher = ? WHERE title = ? AND student_id IN (
+        SELECT id FROM students WHERE login IN ('student1', 'student2') AND role = 'student'
+      )
+    `);
+    renameTeacher.run(subjects[0][1]);
+    for (const [title, teacher] of subjects) updateLessons.run(teacher, title);
+    db.exec('PRAGMA user_version = 8');
+  }
+  if (version < 9) {
+    db.prepare(`
+      UPDATE assignments SET due_at = ? WHERE title = ? AND description = ? AND enrollment_id IN (
+        SELECT e.id FROM enrollments e
+        JOIN students student ON student.id = e.student_id
+        JOIN students teacher ON teacher.id = e.teacher_id
+        WHERE student.login IN ('student1', 'student2') AND teacher.login = 'teacher1'
+          AND e.subject = 'Зельеварение' AND e.semester = ?
+      )
+    `).run(practiceReportDeadline, practiceReportTitle, practiceReportDescription, currentSemester);
+    db.exec('PRAGMA user_version = 9');
+  }
+  if (version < 10) {
+    db.prepare("UPDATE students SET full_name = ? WHERE login = 'student2' AND role = 'student'")
+      .run(studentFixtures[1].name);
+    const insert = db.prepare(`
+      INSERT INTO students (login, password_salt, password_hash, full_name, faculty, program, year, student_group, role, directory_only)
+      VALUES (?, X'', X'', ?, '', '', 0, '', 'student', 1)
+      ON CONFLICT(login) DO NOTHING
+    `);
+    for (const [key, name] of [
+      ['yozhik', 'Ёжик Павлович Иголкин'],
+      ['barash', 'Бараш Семёнович Лирин'],
+      ['losyash', 'Лосяш Аркадьевич Берестов'],
+      ['kopatych', 'Копатыч Степанович Грядкин'],
+      ['pin', 'Пин Генрихович Винтов'],
+      ['kar-karych', 'Кар-Карыч Аркадьевич Воронцов'],
+      ['sovunya', 'Совунья Васильевна Сычёва'],
+    ]) insert.run('directory:' + key, name);
+    db.exec('PRAGMA user_version = 10');
+  }
+  if (version < 11) {
+    setNovemberCancellation(db);
+    db.exec('PRAGMA user_version = 11');
+  }
 }
 
 function isPdf(contents) {
@@ -500,8 +565,8 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
   const dean = prepare("SELECT id FROM students WHERE role = 'dean'");
   const dialogues = prepare(`
     SELECT d.id,
+      partner.id AS partnerId, partner.role AS partnerRole,
       CASE WHEN partner.role = 'dean' THEN 'Деканат' ELSE partner.full_name END AS title,
-      CASE WHEN partner.role = 'teacher' THEN partner.id END AS teacherId,
       CASE WHEN partner.role = 'teacher' THEN partner.login END AS teacherLogin,
       partner.full_name AS fullName,
       CASE partner.role WHEN 'dean' THEN 'Деканат' WHEN 'teacher' THEN 'Преподаватель'
@@ -523,6 +588,21 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     )
   `;
   const teacherContacts = prepare(`SELECT staff.id, staff.login, staff.full_name AS name ${accessibleTeachers}`);
+  const dialogueContacts = prepare(`
+    SELECT partner.id AS partnerId, partner.role AS partnerRole,
+      CASE WHEN partner.role = 'dean' THEN 'Деканат' ELSE partner.full_name END AS title,
+      partner.full_name AS fullName,
+      CASE partner.role WHEN 'dean' THEN 'Деканат' WHEN 'teacher' THEN 'Преподаватель'
+        ELSE COALESCE(NULLIF(TRIM(partner.student_group), ''), 'Студент') END AS roleLabel
+    FROM students partner WHERE partner.id <> ?
+    ORDER BY partner.full_name, partner.id
+  `);
+  const directoryPartner = prepare('SELECT role FROM students WHERE id = ? AND id <> ?');
+  const insertDirectoryDialogue = prepare(`
+    INSERT INTO dialogues (student_id, staff_id) VALUES (?, ?)
+    ON CONFLICT(student_id, staff_id) DO NOTHING
+  `);
+  const directoryDialogue = prepare('SELECT id FROM dialogues WHERE student_id = ? AND staff_id = ?');
   const lessonContacts = prepare('SELECT DISTINCT title, teacher FROM lessons WHERE student_id = ?');
   const enrolledLessonTeacher = prepare(`
     SELECT staff.id, staff.login, staff.full_name AS name
@@ -696,15 +776,16 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
   function cabinet(viewer) {
     const { id, role } = viewer;
     const conversations = dialogues.all({ viewerId: id })
-      .map(({ teacherId, teacherLogin, lastMine, ...dialogue }) => ({
+      .map(({ teacherLogin, lastMine, ...dialogue }) => ({
         ...dialogue, lastMine: lastMine === null ? null : Boolean(lastMine),
-        contact: teacherId === null ? null : teacherContact({ id: teacherId, login: teacherLogin, name: dialogue.fullName }),
+        contact: dialogueContact(dialogue, role, teacherLogin),
       }));
     return {
       grades: role === 'dean' ? [] : grades.all(id, role, id, role),
       requests: role === 'teacher' ? [] : requests.all(id, role)
         .map((row) => ({ ...row, history: requestHistory.all(row.id) })),
       dialogues: conversations,
+      dialogueContacts: dialogueContacts.all(id),
       assignments: role === 'dean' ? [] : assessments.all(id, id)
         .map(({ submissionId, filename, points, comment, status, ...assignment }) => ({
           ...assignment,
@@ -808,6 +889,17 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     createTeacherDialogue.run({ studentId: viewer.id, teacherId });
     const { id: dialogueId } = found(teacherDialogue.get(viewer.id, teacherId), 'Преподаватель недоступен.');
     return { dialogueId };
+  }
+
+  function openDirectoryDialogue(viewer, partnerId) {
+    const partner = found(directoryPartner.get(partnerId, viewer.id), 'Контакт недоступен.');
+    // Keep the student first in mixed-role threads to reuse existing conversations.
+    const viewerIsStudent = viewer.role === 'student';
+    const partnerIsStudent = partner.role === 'student';
+    const viewerFirst = viewerIsStudent !== partnerIsStudent ? viewerIsStudent : viewer.id < partnerId;
+    const participants = viewerFirst ? [viewer.id, partnerId] : [partnerId, viewer.id];
+    insertDirectoryDialogue.run(...participants);
+    return { dialogueId: directoryDialogue.get(...participants).id };
   }
 
   function ownedDialogue(viewer, id) {
@@ -981,6 +1073,7 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     { method: 'GET', path: /^\/api\/requests\/([^/]+)\/print$/, role: 'student', print: true, action: requestPrint },
     { method: 'GET', path: /^\/api\/dialogues\/([^/]+)$/, action: dialogueMessages },
     { method: 'POST', path: /^\/api\/dialogues\/teacher\/([^/]+)$/, role: 'student', action: openTeacherDialogue },
+    { method: 'POST', path: /^\/api\/dialogues\/contact\/([^/]+)$/, action: openDirectoryDialogue },
     { method: 'POST', path: /^\/api\/dialogues\/([^/]+)\/delivered$/, action: deliverMessages },
     { method: 'POST', path: /^\/api\/dialogues\/([^/]+)\/read$/, action: readDialogue },
     { method: 'POST', path: /^\/api\/dialogues\/([^/]+)\/messages$/, action: writeMessage },

@@ -5,6 +5,7 @@ import { once } from 'node:events';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 
 test('roles, applications, replies, grading, appeals and persistence', { timeout: 30000 }, async (t) => {
@@ -70,7 +71,7 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
     assert.equal(response.status, 200, name);
     const { profile } = await response.json();
     assert.equal(profile.role, role);
-    const initials = { student1: 'НР', student2: 'ДР', teacher1: 'МЛ', dean1: 'ИЯ' };
+    const initials = { student1: 'НР', student2: 'КР', teacher1: 'СС', dean1: 'ИЯ' };
     assert.equal(profile.firstName[0] + profile.lastName[0], initials[name]);
     return response.headers.get('set-cookie').split(';')[0];
   };
@@ -132,8 +133,13 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   assert.ok(initial.dialogues.some(({ id, fullName }) => id === teacherChat.dialogueId && fullName === registered.name));
   await expect(startTeacherChat, dean, {}, 403);
   await expect('/dialogues/teacher/999999', student, {}, 404);
-  const cancellations = [...schedule.lessons, ...schedule.nextWeekLessons].filter(({ cancelled }) => cancelled);
-  assert.equal(cancellations.length, 1);
+  const november = (await expect('/schedule?month=2026-11', student)).lessons;
+  assert.ok(november.filter(({ date }) => date >= '2026-11-03' && date <= '2026-11-19')
+    .every(({ change, cancelled }) => change === null && !cancelled));
+  const cancellations = november.filter(({ cancelled }) => cancelled);
+  assert.deepEqual(cancellations.map(({ date }) => date), ['2026-11-26']);
+  const restored = november.find(({ date, title }) => date === '2026-11-19' && title === 'Зельеварение');
+  assert.equal((await expect('/lessons/' + restored.id, student)).lesson.change, null);
   assert.equal((await expect('/lessons/' + cancellations[0].id, student)).lesson.cancelled, true);
   assert.equal((await expect('/schedule', other)).lessons.some(({ cancelled }) => cancelled), false);
 
@@ -182,6 +188,10 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
 
   const dialog = initial.dialogues.find((item) => /деканат/i.test(item.title));
   assert.ok(dialog);
+  assert.equal(dialog.contact.email, 'dean-office@example.com');
+  const deanStudentContact = (await cabinet(dean)).dialogues.find(({ id }) => id === dialog.id).contact;
+  assert.equal(deanStudentContact.name, (await expect('/me', student)).profile.fullName);
+  assert.match(deanStudentContact.email, /@example\.com$/);
   const thread = '/dialogues/' + dialog.id;
   await expect(thread, other, undefined, 404);
   await expect(thread + '/messages', other, { text: 'Чужое сообщение' }, 404);
@@ -215,6 +225,8 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
 
   const teaching = initial.dialogues.find((item) => item.id !== dialog.id);
   assert.ok(teaching);
+  const teacherStudentContact = (await cabinet(teacher)).dialogues.find(({ id }) => id === teaching.id).contact;
+  assert.equal(teacherStudentContact.email, deanStudentContact.email);
   const teachingThread = '/dialogues/' + teaching.id;
   await expect(teachingThread, dean, undefined, 404);
   await expect(teachingThread + '/messages', student, { text: 'Можно уточнить критерии работы?' });
@@ -310,8 +322,38 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   assert.ok((await request('/assignments/' + documentTask.id + '/submission', student, docx, docxHeaders)).ok);
 
   await stop();
+  const legacyDb = new DatabaseSync(env.DB_PATH);
+  legacyDb.exec(`
+    UPDATE lessons SET teacher = 'Прежний преподаватель';
+    UPDATE students SET full_name = 'Мария Ланская' WHERE login = 'teacher1';
+    UPDATE students SET full_name = 'Даниил Андреевич Речин' WHERE login = 'student2';
+    DELETE FROM students WHERE directory_only = 1;
+    UPDATE assignments SET due_at = '2026-11-21T20:00:00.000Z' WHERE title = 'Отчёт по практикуму';
+    PRAGMA user_version = 7;
+  `);
+  legacyDb.close();
   await start();
+  const expectedTeachers = new Map([
+    ['Астрономия', 'Аврора Синистра'],
+    ['Заклинания', 'Филиус Флитвик'],
+    ['Защита от тёмных искусств', 'Римус Люпин'],
+    ['Зельеварение', 'Северус Снегг'],
+    ['Травология', 'Помона Стебль'],
+    ['Трансфигурация', 'Минерва Макгонагалл'],
+  ]);
+  for (const cookie of [student, other]) {
+    const { lessons, nextWeekLessons } = await expect('/schedule', cookie);
+    assert.deepEqual(new Set(lessons.map(({ title }) => title)), new Set(expectedTeachers.keys()));
+    for (const { title, teacher: name } of [...lessons, ...nextWeekLessons]) {
+      assert.equal(name, expectedTeachers.get(title));
+    }
+  }
+  assert.equal((await expect('/me', teacher)).profile.fullName, 'Северус Снегг');
   const persisted = await cabinet(student);
+  for (const snapshot of [persisted, await cabinet(other)]) {
+    assert.equal(snapshot.assignments.find(({ title }) => title === 'Отчёт по практикуму').dueAt,
+      '2026-12-20T20:59:59.000Z');
+  }
   assert.equal((await expect('/library', student)).books[0].favorite, true);
   await expect(bookPath, student, { favorite: false });
   assert.equal((await expect('/library', student)).books[0].favorite, false);
@@ -334,6 +376,52 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   const document = await request('/submissions/' + documentWork.id + '/file', teacher);
   assert.equal(document.status, 200);
   assert.deepEqual(Buffer.from(await document.arrayBuffer()), docx);
+  const studentDirectory = persisted.dialogueContacts.filter(({ partnerRole }) => partnerRole === 'student');
+  assert.equal(studentDirectory.length, 8);
+  const peer = studentDirectory.find(({ title }) => title === 'Крош Андреевич Речин');
+  assert.ok(peer);
+  assert.equal((await expect('/me', other)).profile.fullName, peer.title);
+  const hedgehog = studentDirectory.find(({ title }) => title === 'Ёжик Павлович Иголкин');
+  assert.ok(hedgehog);
+  await expect('/login', null, { login: 'directory:yozhik', password: passwords.student1 }, 401);
+  const { dialogueId: directoryThread } = await expect('/dialogues/contact/' + hedgehog.partnerId, student, {});
+  await expect('/dialogues/' + directoryThread + '/messages', student, { text: 'Привет, Ёжик!' });
+  await expect('/dialogues/' + directoryThread, other, undefined, 404);
+  const mcgonagall = persisted.dialogueContacts.find(({ title }) => title === 'Минерва Макгонагалл');
+  assert.ok(mcgonagall);
+  const peerPath = '/dialogues/contact/' + peer.partnerId;
+  const { dialogueId: peerThread } = await expect(peerPath, student, {});
+  const reverse = (await cabinet(other)).dialogueContacts.find(({ title }) => title === 'Нюша Мироновна Романова');
+  assert.equal((await expect('/dialogues/contact/' + reverse.partnerId, other, {})).dialogueId, peerThread);
+  for (const cookie of [student, other]) {
+    const { dialogues, dialogueContacts } = await cabinet(cookie);
+    assert.equal(dialogues.find(({ id }) => id === peerThread).contact, null);
+    assert.ok(dialogueContacts.every((entry) => !('email' in entry)));
+  }
+  assert.ok(!(await cabinet(dean)).dialogues.some(({ id }) => id === peerThread));
+  await expect('/dialogues/' + peerThread, dean, undefined, 404);
+  await expect('/dialogues/' + peerThread + '/messages', student, { text: 'Первое сообщение студенту', clientId: randomBytes(12).toString('hex') });
+  const peerMessages = await expect('/dialogues/' + peerThread, other);
+  assert.equal(peerMessages.messages[0].text, 'Первое сообщение студенту');
+  const mcgonagallPath = '/dialogues/contact/' + mcgonagall.partnerId;
+  await expect(mcgonagallPath, null, {}, 401);
+  await expect('/dialogues/contact/' + reverse.partnerId, student, {}, 404);
+  const { dialogueId: teacherThread } = await expect(mcgonagallPath, student, {});
+  assert.equal((await expect(mcgonagallPath, student, {})).dialogueId, teacherThread);
+  const { dialogueId: otherTeacherThread } = await expect(mcgonagallPath, other, {});
+  assert.notEqual(otherTeacherThread, teacherThread);
+  await expect('/dialogues/' + teacherThread, other, undefined, 404);
+  const teacherDirectory = (await cabinet(teacher)).dialogueContacts;
+  assert.equal(teacherDirectory.filter(({ partnerRole }) => partnerRole === 'student').length, 9);
+  const deanEntry = teacherDirectory.find(({ partnerRole }) => partnerRole === 'dean');
+  const firstStudent = teacherDirectory.find(({ partnerId }) => partnerId === reverse.partnerId);
+  assert.ok(firstStudent);
+  assert.equal((await expect('/dialogues/contact/' + firstStudent.partnerId, teacher, {})).dialogueId, teaching.id);
+  const { dialogueId: staffThread } = await expect('/dialogues/contact/' + deanEntry.partnerId, teacher, {});
+  const deanDirectory = (await cabinet(dean)).dialogueContacts;
+  const snape = deanDirectory.find(({ fullName }) => fullName === 'Северус Снегг');
+  assert.equal((await expect('/dialogues/contact/' + snape.partnerId, dean, {})).dialogueId, staffThread);
+  await expect('/dialogues/' + staffThread, student, undefined, 404);
 });
 
 function tinyPdf() {

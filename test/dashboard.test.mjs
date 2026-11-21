@@ -52,7 +52,7 @@ test('an open student cabinet refreshes the schedule through midnight', async ()
   assert.equal(shown, today);
 });
 
-test('the next deadline disappears when time passes without a change in cabinet data', () => {
+test('an unsent deadline becomes overdue without a change in cabinet data', () => {
   let shown;
   const container = { replaceChildren(...children) { shown = children; } };
   const state = {
@@ -62,7 +62,7 @@ test('the next deadline disappears when time passes without a change in cabinet 
     renders: new Map(), document: {},
     stat: (hash) => ({ hash, addEventListener() {} }),
     panel: (_title, contents) => contents,
-    listFor: (items) => items.map(({ title }) => title).join(','),
+    listFor: (items) => items.map(({ title, overdue }) => overdue ? title + ' (просрочено)' : title).join(','),
   };
   const render = runInNewContext(`let clock; Date.now = () => clock;`
     + section('function renderDashboard(', 'function renderGrades(')
@@ -70,7 +70,7 @@ test('the next deadline disappears when time passes without a change in cabinet 
   render(Date.parse('2026-11-22T20:59:00Z'));
   assert.deepEqual(shown, ['Работа']);
   render(Date.parse('2026-11-22T21:01:00Z'));
-  assert.deepEqual(shown, ['']);
+  assert.deepEqual(shown, ['Работа (просрочено)']);
 });
 
 test('a request list updates while remaining form fields preserve the draft', () => {

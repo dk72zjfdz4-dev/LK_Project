@@ -79,6 +79,9 @@
     grid-template-columns: minmax(0, 1fr);
     height: max(230px, calc(var(--messenger-viewport-height, 100dvh) - var(--mobile-tabs-height) - 8rem - env(safe-area-inset-top)));
   }
+  .messaging.has-dialogue {
+    height: max(190px, calc(var(--messenger-viewport-height, 100dvh) - var(--mobile-tabs-height) - 8rem - 54px - env(safe-area-inset-top)));
+  }
 
   .messaging:not(.has-dialogue) .conversation,
   .messaging.has-dialogue .dialogue-panel {
@@ -86,7 +89,6 @@
   }
 
   .messaging .dialogue-list { padding-block-end: 52px; }
-  .messaging .conversation-title .dialogue-back { display: inline-flex; }
   .messaging .dialogue-avatar { width: 34px; height: 34px; }
   .messaging .dialogue-contact summary { padding-inline: 4px; }
 
@@ -127,7 +129,7 @@
   .app-footer { padding-bottom: 68px; }
 
   .help-dock {
-    bottom: calc(var(--mobile-tabs-height) + var(--mobile-dock-gap));
+    --help-dock-bottom: calc(var(--mobile-tabs-height) + var(--mobile-dock-gap));
   }
 
   .help-dialog[open] {

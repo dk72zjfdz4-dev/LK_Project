@@ -2,7 +2,7 @@ import { randomBytes, createHash, scrypt, scryptSync, timingSafeEqual } from 'no
 import { lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { readFile, realpath } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { basename, dirname, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -49,11 +49,11 @@ const demos = [
   },
   {
     login: 'student2',
-    firstName: 'Даниил',
+    firstName: 'Крош',
     lastName: 'Речин',
     passwordEnv: 'DEMO_PASSWORD_2',
     role: 'student',
-    profile: ['Даниил Речин', 'Факультет международной экономики', 'Экономика', 3, 'МЭ-23-04'],
+    profile: ['Крош Андреевич Речин', 'Факультет международной экономики', 'Экономика', 3, 'МЭ-23-04'],
     lessons: [
       [1, '10:40', '12:00', 'Эконометрика', 'В-201', 'Артём Озёрский', null],
       [1, '12:30', '13:50', 'Международные финансы', 'А-314', 'Елена Светлова', null],
@@ -69,11 +69,20 @@ const demos = [
   },
   {
     login: 'teacher1',
-    firstName: 'Мария',
-    lastName: 'Ланская',
+    firstName: 'Северус',
+    lastName: 'Снегг',
     passwordEnv: 'DEMO_PASSWORD_TEACHER',
     role: 'teacher',
-    profile: ['Мария Ланская', 'Кафедра практических дисциплин', 'Зельеварение', 0, ''],
+    profile: ['Северус Снегг', 'Кафедра практических дисциплин', 'Зельеварение', 0, ''],
+    lessons: [],
+  },
+  {
+    login: 'teacher2',
+    firstName: 'Минерва',
+    lastName: 'Макгонагалл',
+    passwordEnv: 'DEMO_PASSWORD_MCGONAGALL',
+    role: 'teacher',
+    profile: ['Минерва Макгонагалл', 'Кафедра практических дисциплин', 'Трансфигурация', 0, ''],
     lessons: [],
   },
   {
@@ -85,6 +94,17 @@ const demos = [
     profile: ['Ирина Яровая', 'Деканат', 'Учебная служба', 0, ''],
     lessons: [],
   },
+  ...[
+    ['teacher3', 'DEMO_PASSWORD_FLITWICK', 'Филиус', 'Флитвик', 'Заклинания'],
+    ['teacher4', 'DEMO_PASSWORD_SPROUT', 'Помона', 'Стебль', 'Травология'],
+    ['teacher5', 'DEMO_PASSWORD_SINISTRA', 'Аврора', 'Синистра', 'Астрономия'],
+    ['teacher6', 'DEMO_PASSWORD_LUPIN', 'Римус', 'Люпин', 'Защита от тёмных искусств'],
+  ].map(([login, passwordEnv, firstName, lastName, subject]) => ({
+    login, passwordEnv, firstName, lastName,
+    role: 'teacher',
+    profile: [firstName + ' ' + lastName, 'Кафедра практических дисциплин', subject, 0, ''],
+    lessons: [],
+  })),
 ];
 
 const staticFiles = new Map([
@@ -100,7 +120,7 @@ const staticFiles = new Map([
 
 function isPublicPath(path) {
   const location = relative(publicDirectory, path);
-  return location === '' || (location !== '..' && !location.startsWith('../'));
+  return !isAbsolute(location) && location !== '..' && !location.startsWith(`..${sep}`);
 }
 
 if (!Number.isInteger(port) || port < 0 || port > 65535) {
@@ -153,11 +173,11 @@ db.exec(`
 `);
 transaction(() => installCabinet(db));
 
-const studentByLogin = db.prepare('SELECT * FROM students WHERE login = ?');
+const studentByLogin = db.prepare('SELECT * FROM students WHERE login = ? AND directory_only = 0');
 const profileBySession = db.prepare(`
   SELECT students.id, login, full_name, faculty, program, year, student_group, role
   FROM sessions JOIN students ON students.id = sessions.student_id
-  WHERE token_hash = ? AND expires_at > ?
+  WHERE token_hash = ? AND expires_at > ? AND students.directory_only = 0
 `);
 const allLessons = db.prepare(`
   SELECT * FROM lessons WHERE student_id = ? ORDER BY weekday, start_time, id
@@ -175,7 +195,7 @@ const removeSession = db.prepare('DELETE FROM sessions WHERE token_hash = ?');
 const removeExpiredSessions = db.prepare('DELETE FROM sessions WHERE expires_at <= ?');
 const insertSession = db.prepare(`
   INSERT INTO sessions (token_hash, student_id, expires_at)
-  SELECT ?, id, ? FROM students WHERE id = ? AND password_hash = ?
+  SELECT ?, id, ? FROM students WHERE id = ? AND password_hash = ? AND directory_only = 0
 `);
 
 function transaction(operation) {
@@ -226,7 +246,7 @@ function seedDemos(reset = false) {
       }
       if (configuredPassword === undefined) generated.push([demo.login, password]);
     }
-    seedCabinet(db, weekInMoscow());
+    seedCabinet(db);
   });
   if (generated.length && (reset || process.stdout.isTTY)) {
     for (const [login, password] of generated) console.log(`${login} ${password}`);
@@ -259,11 +279,13 @@ function weekInMoscow() {
 }
 
 function lessonOn(row, date, cancellation) {
+  const unchangedNovemberDay = date >= '2026-11-03' && date <= '2026-11-19';
   return {
     id: `${row.id}-${date}`, date,
     start: row.start_time, end: row.end_time,
     title: row.title, room: row.room, teacher: row.teacher,
-    change: cancellation ?? row.change, cancelled: Boolean(cancellation),
+    change: unchangedNovemberDay ? null : cancellation ?? row.change,
+    cancelled: !unchangedNovemberDay && Boolean(cancellation),
     contact: cabinet.lessonContact(row.student_id, row),
   };
 }
@@ -290,6 +312,25 @@ function schedule(studentId) {
     lessons: weekLessons(rows, monday, 0, cancellations),
     nextWeekLessons: weekLessons(rows, monday, 7, cancellations),
   };
+}
+
+function monthSchedule(studentId, month) {
+  if (month !== '2026-11' && month !== '2026-12') throw new HttpError(400, 'Доступно расписание на ноябрь и декабрь 2026 года.');
+  const first = new Date(month + '-01T00:00:00Z');
+  const after = new Date(first);
+  after.setUTCMonth(after.getUTCMonth() + 1);
+  const last = new Date(after.getTime() - 86400000);
+  const cancellations = new Map(cancelledLessons.all(studentId, civilDate(first), civilDate(last))
+    .map(({ lesson_id, date, change }) => [`${lesson_id}-${date}`, change]));
+  const rows = allLessons.all(studentId);
+  const lessons = [];
+  for (const day = new Date(first); day < after; day.setUTCDate(day.getUTCDate() + 1)) {
+    const date = civilDate(day);
+    for (const row of rows.filter(({ weekday }) => weekday === (day.getUTCDay() || 7))) {
+      lessons.push(lessonOn(row, date, cancellations.get(`${row.id}-${date}`)));
+    }
+  }
+  return { month, today: weekInMoscow().today, lessons };
 }
 
 function lessonById(studentId, id) {
@@ -433,7 +474,10 @@ async function api(request, response, path) {
     return json(response, 200, cabinet.help(account, params.get('q')));
   }
   if (account.role !== 'student') throw new HttpError(403, 'Расписание доступно студентам.');
-  if (path === '/api/schedule') return json(response, 200, schedule(account.id));
+  if (path === '/api/schedule') {
+    const month = new URLSearchParams(request.url.slice(path.length + 1)).get('month');
+    return json(response, 200, month === null ? schedule(account.id) : monthSchedule(account.id, month));
+  }
 
   const lesson = lessonById(account.id, lessonPath[1]);
   if (!lesson) throw new HttpError(404, 'Занятие не найдено.');

@@ -87,7 +87,19 @@ test('student accounts, schedule ownership and session revocation', { timeout: 2
     const { lessons, nextWeekLessons } = await schedule.json();
     assert.ok(lessons.length);
     assert.ok(nextWeekLessons[0].date > lessons.at(-1).date);
-    users.push({ cookie, name: student.fullName, lesson: lessons[0].id, nextLesson: nextWeekLessons[0].id });
+    let monthLesson;
+    for (const month of ['2026-11', '2026-12']) {
+      const monthly = await request('/api/schedule?month=' + month, { cookie });
+      assert.equal(monthly.status, 200);
+      const payload = await monthly.json();
+      assert.equal(payload.month, month);
+      assert.ok(payload.lessons.length > lessons.length);
+      assert.ok(payload.lessons.every(({ date }) => date.startsWith(month + '-')));
+      assert.equal(new Set(payload.lessons.map(({ id }) => id)).size, payload.lessons.length);
+      if (month === '2026-12') monthLesson = payload.lessons.at(-1).id;
+    }
+    assert.equal((await request('/api/schedule?month=2026-13', { cookie })).status, 400);
+    users.push({ cookie, name: student.fullName, lesson: lessons[0].id, nextLesson: nextWeekLessons[0].id, monthLesson });
   }
 
   assert.notEqual(users[0].name, users[1].name);
@@ -97,6 +109,8 @@ test('student accounts, schedule ownership and session revocation', { timeout: 2
     assert.equal((await request(`/api/lessons/${users[1 - index].lesson}`, user)).status, 404);
     assert.equal((await request(`/api/lessons/${user.nextLesson}`, user)).status, 200);
     assert.equal((await request(`/api/lessons/${users[1 - index].nextLesson}`, user)).status, 404);
+    assert.equal((await request(`/api/lessons/${user.monthLesson}`, user)).status, 200);
+    assert.equal((await request(`/api/lessons/${users[1 - index].monthLesson}`, user)).status, 404);
     const rejected = await request('/api/logout', { ...user, method: 'POST', requestOrigin: 'https://example.invalid' });
     assert.equal(rejected.status, 403);
     assert.equal((await request('/api/logout', { ...user, method: 'POST' })).status, 204);

@@ -48,12 +48,13 @@ let signingOut = false;
 let activeView;
 let schedule;
 let scheduleLoad;
+let monthScheduleLoad;
+let selectedMonth;
 let cabinet;
 let cabinetLoad;
 let pollTimer;
 let selectedDay;
 let selectedHomeDay;
-let selectedGradeSemester;
 let selectedDialogue;
 let dialogueLoad;
 let lessonOpen;
@@ -177,15 +178,26 @@ function revealTarget() {
     if (!dialogue) return;
     pendingTarget = undefined;
     setNewDialogueMode(!dialogue.lastAt);
+    if (!dialogue.lastAt) {
+      byId('dialogue-category').value = dialogue.partnerRole;
+      refreshDialogueList();
+    }
     openDialogue(dialogue, byId('page-heading').classList.contains('pointer-navigation'));
     return;
   }
   const target = byId(pendingTarget);
   if (!target || !byId('view-' + activeView).contains(target)) return;
   pendingTarget = undefined;
+  if (activeView === 'grades') {
+    const semester = target.closest('.grade-semester');
+    if (semester) semester.open = true;
+  }
   if (target.tagName === 'DETAILS') target.open = true;
   const day = target.closest('.calendar-day');
-  if (day) selectDay(day.dataset.date);
+  if (day) {
+    setScheduleMode(false);
+    selectDay(day.dataset.date);
+  }
   const focus = target.querySelector('summary, button, [tabindex="-1"]') || target;
   focus.focus({ preventScroll: true });
   focus.scrollIntoView({ block: 'nearest' });
@@ -199,10 +211,11 @@ function preservePagePosition(update) {
 
 function showLogin(message = '', focusHeading = false) {
   closeLesson(false);
+  monthScheduleLoad = selectedMonth = undefined;
+  setScheduleMode(false);
   openNavGroups.clear();
   profile = undefined;
   activeView = schedule = scheduleLoad = cabinet = cabinetLoad = selectedDay = selectedHomeDay = selectedDialogue = dialogueLoad = lessonOpen = undefined;
-  selectedGradeSemester = undefined;
   window.clearInterval(pollTimer);
   renders.clear();
   messageStates.clear();
@@ -214,6 +227,9 @@ function showLogin(message = '', focusHeading = false) {
   closeDialogue();
   byId('dialogue-search').value = '';
   byId('dialogue-filter').selectedIndex = 0;
+  byId('dialogue-category').selectedIndex = 0;
+  byId('dialogue-category').hidden = true;
+  byId('dialogue-start-error').textContent = '';
   byId('dialogues-content').replaceChildren();
   byId('messages-content').scrollTop = 0;
   messageText.value = '';
@@ -252,6 +268,7 @@ function showLogin(message = '', focusHeading = false) {
   byId('app-error').textContent = '';
   byId('cabinet-status').hidden = true;
   byId('home-stats').hidden = true;
+  byId('home-staff-stats').hidden = true;
   byId('home-staff').hidden = true;
   byId('home-cabinet').hidden = true;
   byId('messaging').hidden = true;
@@ -268,7 +285,7 @@ function showLogin(message = '', focusHeading = false) {
   }
   for (const id of [
     'week-grid', 'upcoming-lessons', 'changed-lessons', 'home-day', 'home-week-label', 'home-stats',
-    'home-cabinet', 'home-staff', 'grades-content', 'assignments-content', 'requests-content',
+    'home-cabinet', 'home-staff', 'home-staff-stats', 'grades-content', 'assignments-content', 'requests-content',
     'dialogues-content', 'updates-content', 'contacts-content', 'dialogue-contact', 'lesson-dialog-content', 'action-status',
     'documents-content', 'document-catalog-status', 'faq-status',
     'library-results', 'library-status', 'library-error',
@@ -311,7 +328,8 @@ function showApp(account, focusHeading = false) {
   byId('sidebar-group').textContent = groupOrRole;
   byId('document-catalog').hidden = profile.role !== 'student';
   byId('home-status').hidden = true;
-  byId('home-schedule').hidden = true;
+  byId('home-upcoming').hidden = true;
+  byId('home-changes').hidden = true;
   byId('home-week').closest('section').hidden = true;
   byId('session-loading').hidden = true;
   byId('login-screen').hidden = true;
@@ -501,7 +519,7 @@ function selectHomeDay(date) {
   day.replaceChildren(heading, contents);
 }
 
-function calendarDay(date, day, today, lessons) {
+function calendarDay(date, day, today, lessons, cardPrefix = 'lesson-') {
   const column = element('section', 'calendar-day');
   column.dataset.date = date;
   const header = element('div', 'day-header');
@@ -516,7 +534,7 @@ function calendarDay(date, day, today, lessons) {
   column.append(header);
   renderList(column.appendChild(element('div', 'day-lessons')), lessons, (lesson) => {
     const card = element('li', 'calendar-card');
-    card.id = 'lesson-' + lesson.id;
+    card.id = cardPrefix + lesson.id;
     card.append(
       element('p', 'lesson-time', lessonTimes(lesson)),
       lessonTitle(lesson, 'h4'),
@@ -574,6 +592,100 @@ function renderWeek(lessons, today, start) {
   selectHomeDay(isoDates.includes(selectedHomeDay) ? selectedHomeDay : active);
   if (focusedHomeDay) {
     [...homeWeek.querySelectorAll('input')].find((input) => input.value === focusedHomeDay)?.focus({ preventScroll: true });
+  }
+}
+
+function setScheduleMode(monthly) {
+  byId('schedule-week-mode').setAttribute('aria-pressed', String(!monthly));
+  byId('schedule-month-mode').setAttribute('aria-pressed', String(monthly));
+  byId('schedule-week-view').hidden = monthly;
+  byId('schedule-month-view').hidden = !monthly;
+  if (!monthly || selectedMonth) return;
+  const current = schedule?.today.slice(0, 7);
+  if (current === '2026-12') byId('schedule-month').value = current;
+  else byId('schedule-month').value = '2026-11';
+  loadMonthSchedule();
+}
+
+function renderMonth({ month, today, lessons }) {
+  const grid = byId('month-grid');
+  const first = dateAt(month + '-01');
+  const days = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
+  const offset = (first.getUTCDay() + 6) % 7;
+  const cells = shortWeekdays.map((name) => element('span', 'month-weekday', name));
+  const dayButtons = [];
+  for (let index = 0; index < offset; index++) cells.push(element('span', 'month-blank'));
+  for (let day = 1; day <= days; day++) {
+    const date = month + '-' + String(day).padStart(2, '0');
+    const weekday = (offset + day - 1) % 7;
+    const entries = lessons.filter((lesson) => lesson.date === date);
+    const hasChanges = entries.some(({ change, cancelled }) => change || cancelled);
+    const cell = element('div', 'month-cell');
+    if (weekday >= 5) cell.classList.add('month-weekend');
+    if (date === today) cell.classList.add('calendar-today');
+    if (hasChanges) cell.classList.add('month-changed');
+    const button = element('button', 'month-day-choice');
+    button.type = 'button';
+    button.setAttribute('aria-label', dayFormat.format(dateAt(date)) + ', занятий: ' + entries.length
+      + (hasChanges ? ', есть изменения' : ''));
+    button.setAttribute('aria-pressed', 'false');
+    button.setAttribute('aria-controls', 'month-day');
+    if (date === today) button.setAttribute('aria-current', 'date');
+    button.append(element('span', 'month-choice-date', day));
+    if (entries.length) button.append(element('span', 'month-choice-count', entries.length));
+    if (hasChanges) button.append(element('span', 'month-change-mark', 'Изменения'));
+    const select = (scroll = false) => {
+      for (const item of dayButtons) item.button.setAttribute('aria-pressed', String(item.button === button));
+      const agenda = calendarDay(date, weekday, today, entries, 'month-lesson-');
+      byId('month-day').replaceChildren(agenda);
+      if (scroll) agenda.scrollIntoView({ block: 'nearest' });
+    };
+    button.addEventListener('click', () => select(true));
+    dayButtons.push({ button, date, select });
+    const list = element('ul', 'month-lessons');
+    for (const lesson of entries) {
+      const row = element('li', lesson.cancelled ? 'month-lesson calendar-cancelled' : 'month-lesson');
+      const link = element('button', 'lesson-link');
+      link.type = 'button';
+      link.append(element('span', 'lesson-time', lesson.start), element('span', '', lesson.title));
+      if (lesson.cancelled) link.append(element('span', 'visually-hidden', ', отменено'));
+      link.addEventListener('click', () => openLesson(lesson.id, link));
+      row.append(link);
+      list.append(row);
+    }
+    cell.append(button, list);
+    cells.push(cell);
+  }
+  grid.replaceChildren(...cells);
+  if (window.matchMedia('(max-width: 960px)').matches) {
+    (dayButtons.find(({ date }) => date === today) ?? dayButtons[0]).select();
+  }
+}
+
+async function loadMonthSchedule() {
+  const account = profile;
+  const month = byId('schedule-month').value;
+  selectedMonth = month;
+  const load = {};
+  monthScheduleLoad = load;
+  const current = () => profile === account && monthScheduleLoad === load;
+  const status = byId('month-schedule-status');
+  const retry = byId('month-schedule-retry');
+  retry.hidden = true;
+  byId('month-grid').replaceChildren();
+  byId('month-day').replaceChildren();
+  status.textContent = 'Загружаем расписание…';
+  try {
+    const data = await request('/api/schedule?month=' + encodeURIComponent(month));
+    if (!current()) return;
+    renderMonth(data);
+    status.textContent = '';
+  } catch (error) {
+    if (!current() || endSession(error)) return;
+    status.textContent = error.message;
+    retry.hidden = false;
+  } finally {
+    if (monthScheduleLoad === load) monthScheduleLoad = undefined;
   }
 }
 
@@ -729,9 +841,7 @@ function renderCabinet(force = false) {
   switch (activeView) {
     case 'grades':
       if (profile.role === 'student') {
-        const targetGrade = cabinet.grades.find(({ id }) => 'grade-' + id === pendingTarget);
-        if (targetGrade) selectedGradeSemester = targetGrade.semester;
-        renderSection('grades-content', [cabinet.grades, cabinet.assignments, cabinet.appeals, selectedGradeSemester], renderStudentGrades, force);
+        renderSection('grades-content', [cabinet.grades, cabinet.assignments, cabinet.appeals], renderStudentGrades, force);
       } else {
         renderSection('grades-content', cabinet.grades, renderGrades, force);
       }
@@ -862,24 +972,27 @@ function eventTime(value) {
 
 function renderDashboard() {
   const student = profile.role === 'student';
-  const stats = byId('home-stats');
+  const stats = byId(student ? 'home-stats' : 'home-staff-stats');
   const activeRequests = cabinet?.requests.filter((item) => ['submitted', 'processing'].includes(item.status)).length;
   const pendingAssignments = cabinet?.assignments.filter((item) => student
     ? !item.submission
     : item.submission?.status === 'submitted').length;
   const now = Date.now();
-  const deadlines = student ? (cabinet?.assignments ?? [])
-    .filter((item) => !item.submission && new Date(item.dueAt).getTime() >= now)
+  const outstanding = student ? (cabinet?.assignments ?? [])
+    .filter((item) => !item.submission)
     .sort((a, b) => a.dueAt.localeCompare(b.dueAt))
-    .slice(0, 3) : [];
-  const recentKey = JSON.stringify([profile.role, cabinet?.unreadCount, cabinet?.requests, cabinet?.assignments, deadlines]);
+    .map((item) => ({ ...item, overdue: new Date(item.dueAt).getTime() < now })) : [];
+  const deadlines = [
+    ...outstanding.filter(({ overdue }) => overdue),
+    ...outstanding.filter(({ overdue }) => !overdue).slice(0, 3),
+  ];
+  const recentKey = JSON.stringify([profile.role, cabinet?.requests, cabinet?.assignments, deadlines]);
   if (renders.get('dashboard') === recentKey) return;
   renders.set('dashboard', recentKey);
   const focused = document.activeElement?.id;
   const cards = [];
   if (student || profile.role === 'teacher') cards.push(stat('#assignments', pendingAssignments ?? '—', student ? 'Заданий к сдаче' : 'Работ на проверке'));
   if (student || profile.role === 'dean') cards.push(stat('#requests', activeRequests ?? '—', 'Открытых заявок'));
-  cards.push(stat('#messages', cabinet?.unreadCount ?? '—', 'Непрочитанных сообщений'));
   for (const card of cards) card.id = 'stat-' + card.hash.slice(1);
   stats.replaceChildren(...cards);
   stats.hidden = false;
@@ -894,7 +1007,10 @@ function renderDashboard() {
       info.append(title, element('p', 'muted', item.subject));
       const deadline = element('time', 'deadline-date', eventTime(item.dueAt));
       deadline.dateTime = item.dueAt;
-      row.append(info, deadline);
+      const timing = element('div', 'deadline-timing');
+      timing.append(deadline);
+      if (item.overdue) timing.append(statusBadge('Просрочено', 'overdue'));
+      row.append(info, timing);
       return row;
     }, cabinet ? 'Ближайших дедлайнов нет.' : 'Загружаем задания…'));
     byId('home-cabinet').replaceChildren(deadlinePanel);
@@ -938,11 +1054,7 @@ function gradeDetails(item) {
   summary.id = detail.id + '-summary';
   const labels = element('span', 'record-labels');
   labels.append(element('strong', '', item.subject));
-  if (student) {
-    labels.append(element('span', 'muted grade-summary-control', item.control + ' · ' + (item.result || 'Итог пока не зафиксирован')));
-  } else {
-    labels.append(element('span', 'muted', item.studentName));
-  }
+  if (!student) labels.append(element('span', 'muted', item.studentName));
   const score = element('span', 'grade-score', gradeScore(item.points, item.maxPoints));
   summary.append(labels, score);
   const progress = element('progress', 'grade-progress');
@@ -950,8 +1062,6 @@ function gradeDetails(item) {
   progress.value = item.points;
   progress.setAttribute('aria-label', 'Баллы по дисциплине «' + item.subject + '»');
   detail.append(summary, progress, metadata([
-    ['Текущие баллы', student ? pointsFormat.format(item.points) : null],
-    ['Максимум баллов', student ? pointsFormat.format(item.maxPoints) : null],
     ['Форма контроля', item.control],
     ['Итог контроля', item.result || 'Пока не зафиксирован'],
     ['Критерии', item.criteria],
@@ -959,44 +1069,55 @@ function gradeDetails(item) {
   return detail;
 }
 
-function renderStudentGrades([grades, assignments, appeals, selected]) {
+function renderStudentGrades([grades, assignments, appeals]) {
   if (!grades.length) return [panel('Оценки', element('p', 'empty-state', 'Оценок пока нет.'))];
   const semesters = [...new Set(grades.map((item) => item.semester))].sort((a, b) => b - a);
-  const semester = semesters.includes(selected) ? selected : semesters[0];
-  const controls = element('div', 'grade-filters');
-  const select = element('select');
-  select.id = 'grade-semester';
-  select.setAttribute('aria-controls', 'grade-semester-results');
-  const label = element('label', '', 'Семестр');
-  label.htmlFor = select.id;
-  for (const number of semesters) {
-    const option = element('option', '', number + ' семестр');
-    option.value = number;
-    select.append(option);
+  const current = grades.filter(({ semester }) => semester === semesters[0]);
+  const scored = current.filter(({ maxPoints }) => maxPoints > 0);
+  const average = scored.length
+    ? Math.round(scored.reduce((sum, { points, maxPoints }) => sum + points / maxPoints * 100, 0) / scored.length)
+    : '—';
+  const overview = element('div', 'grades-overview');
+  overview.append(element('p', 'muted', 'Твой прогресс по дисциплинам'));
+  const stats = element('dl', 'grade-stats');
+  for (const [label, value] of [['Дисциплин', current.length], ['Средний балл из 100', average]]) {
+    const stat = element('div', 'grade-stat');
+    stat.append(element('dt', '', label), element('dd', '', value));
+    stats.append(stat);
   }
-  select.value = semester;
-  select.addEventListener('change', () => {
-    selectedGradeSemester = Number(select.value);
-    renderCabinet();
-  });
-  controls.append(label, select);
+  overview.append(stats);
   const appealsBySubmission = new Map(appeals.map((item) => [item.submissionId, item]));
-  const results = listFor(grades.filter((item) => item.semester === semester), (item) => {
-    const detail = gradeDetails(item);
-    const related = assignments.filter((assignment) => assignment.enrollmentId === item.id);
-    detail.append(studentGradeBreakdown(item, related, appealsBySubmission));
-    return detail;
-  }, 'Оценок пока нет.');
-  results.id = 'grade-semester-results';
-  const section = element('section', 'panel');
-  section.setAttribute('aria-label', 'Оценки по дисциплинам');
-  section.append(controls, results);
-  return [section];
+  const blocks = semesters.map((semester, index) => {
+    const isCurrent = index === 0;
+    const block = element('details', 'panel grade-semester');
+    block.id = 'grade-semester-' + semester;
+    block.open = byId(block.id)?.open ?? isCurrent;
+    const summary = element('summary', 'grade-semester-summary');
+    summary.id = block.id + '-summary';
+    summary.append(element('strong', '', semester + ' семестр'),
+      statusBadge(isCurrent ? 'Текущий' : 'Завершён', isCurrent ? 'ready' : 'submitted'));
+    const semesterGrades = grades.filter((item) => item.semester === semester);
+    const results = listFor(semesterGrades, (item) => {
+      const detail = gradeDetails(item);
+      detail.open = byId(detail.id)?.open ?? (isCurrent && item === semesterGrades[0]);
+      const related = assignments.filter((assignment) => assignment.enrollmentId === item.id);
+      const breakdown = element('details', 'grade-breakdown');
+      breakdown.id = detail.id + '-breakdown';
+      const label = element('summary', '', 'Из чего складываются баллы');
+      label.id = breakdown.id + '-summary';
+      breakdown.append(label, studentGradeBreakdown(item, related, appealsBySubmission));
+      detail.append(breakdown);
+      return detail;
+    }, 'Оценок пока нет.');
+    block.append(summary, results);
+    return block;
+  });
+  return [overview, ...blocks];
 }
 
 function studentGradeBreakdown(grade, assignments, appealsBySubmission) {
   const content = document.createDocumentFragment();
-  content.append(element('h3', 'record-subheading', 'Из чего складываются баллы'), metadata([
+  content.append(metadata([
     ['Ранее учтённые баллы без детализации', gradeScore(grade.courseworkPoints, grade.courseworkMax)],
   ]));
   if (assignments.length) {
@@ -1075,7 +1196,7 @@ function contactCard(contact, { withId = false, canMessage = false } = {}) {
   if (studentMessaging && contact.teacherId) {
     const write = element('button', 'button button-secondary', 'Написать');
     write.type = 'button';
-    write.addEventListener('click', (event) => openTeacherDialogue(contact.teacherId, write, errorOutput, event));
+    write.addEventListener('click', (event) => startDialogue(resource('/api/dialogues/teacher', contact.teacherId), write, errorOutput, event));
     actions.append(write);
   }
   actions.append(copy, mail);
@@ -1086,7 +1207,7 @@ function contactCard(contact, { withId = false, canMessage = false } = {}) {
   return card;
 }
 
-async function openTeacherDialogue(teacherId, button, errorOutput, event) {
+async function startDialogue(path, button, errorOutput, event) {
   const account = profile;
   if (!account || signingOut || button.disabled) return;
   const origin = window.location.hash;
@@ -1096,7 +1217,7 @@ async function openTeacherDialogue(teacherId, button, errorOutput, event) {
   button.disabled = true;
   errorOutput.textContent = '';
   try {
-    const { dialogueId } = await post(resource('/api/dialogues/teacher', teacherId), {});
+    const { dialogueId } = await post(path, {});
     if (!current()) return;
     const updated = await loadCabinet({ quiet: true, fresh: true });
     if (!current()) return;
@@ -1124,10 +1245,8 @@ function renderDialogueContact(item) {
   if (renders.get('dialogue-contact') === signature) return;
   const content = byId('dialogue-contact');
   content.replaceChildren();
-  if (item) {
-    content.append(element('p', 'record-copy', item.fullName ?? item.title));
-    if (item.contact) content.append(contactCard(item.contact));
-  }
+  if (item?.contact) content.append(contactCard(item.contact));
+  else if (item) content.append(element('p', 'record-copy', item.fullName ?? item.title));
   renders.set('dialogue-contact', signature);
 }
 
@@ -1381,10 +1500,15 @@ function helpWordScore(query, word) {
 }
 
 function findHelpSuggestions(faq, text) {
-  const words = [...new Set(helpWords(text))].filter((word) => !['как', 'где', 'и', 'в', 'на', 'по', 'о', 'об', 'для'].includes(word));
-  if (!words.length || words.every((word) => word.length < 2)) return [];
+  const tokens = helpWords(text);
+  const singleLetter = /^\p{L}$/u.test(text.trim().normalize('NFC'));
+  const words = singleLetter ? tokens : [...new Set(tokens)]
+    .filter((word) => !['как', 'где', 'и', 'в', 'на', 'по', 'о', 'об', 'для'].includes(word));
+  if (!words.length || (!singleLetter && words.every((word) => word.length < 2))) return [];
+  const shortPrefix = words.length === 1 && words[0].length < 5;
   return faq.map((entry) => {
-    const score = [entry.title, ...entry.terms].reduce((best, phrase) => {
+    const phrases = shortPrefix ? [entry.title] : [entry.title, ...entry.terms];
+    const score = phrases.reduce((best, phrase) => {
       const tokens = helpWords(phrase);
       const scores = words.map((word) => tokens.reduce((max, token) => Math.max(max, helpWordScore(word, token)), 0));
       return scores.every(Boolean) ? Math.max(best, scores.reduce((sum, value) => sum + value, 0)) : best;
@@ -2198,13 +2322,18 @@ function refreshDialogueList() {
   if (!cabinet) return;
   const list = byId('dialogues-content');
   const position = list.scrollTop;
-  renderSection('dialogues-content', [cabinet.dialogues, selectedDialogue, newDialogueMode,
-    byId('dialogue-search').value, byId('dialogue-filter').value], () => renderDialogues(cabinet.dialogues));
+  renderSection('dialogues-content', [cabinet.dialogues, cabinet.dialogueContacts, selectedDialogue, newDialogueMode,
+    byId('dialogue-search').value, byId('dialogue-filter').value, byId('dialogue-category').value], renderDialogues);
   list.scrollTop = position;
-  byId('dialogue-new').setAttribute('aria-pressed', String(newDialogueMode));
+  const modeButton = byId('dialogue-new');
+  const modeLabel = newDialogueMode ? 'Назад к диалогам' : 'Новый диалог';
+  modeButton.setAttribute('aria-label', modeLabel);
+  modeButton.querySelector('path').setAttribute('d', newDialogueMode ? 'M19 12H5m7-7-7 7 7 7' : 'M12 5v14M5 12h14');
+  byId('dialogue-new-tooltip').textContent = modeLabel;
   byId('dialogues-heading').textContent = newDialogueMode ? 'Новая переписка' : 'Диалоги';
   byId('dialogue-search').placeholder = newDialogueMode ? 'Поиск контактов' : 'Поиск диалогов';
   byId('dialogue-filter').hidden = newDialogueMode;
+  byId('dialogue-category').hidden = !newDialogueMode;
 }
 
 function setNewDialogueMode(open) {
@@ -2213,21 +2342,26 @@ function setNewDialogueMode(open) {
   if (open) dialogueListQuery = search.value;
   search.value = open ? '' : dialogueListQuery;
   newDialogueMode = open;
+  byId('dialogue-start-error').textContent = '';
   dialogueListScroll = 0;
   refreshDialogueList();
 }
 
-function renderDialogues(dialogues) {
+function renderDialogues([dialogues, directory]) {
   const query = byId('dialogue-search').value.trim().toLocaleLowerCase('ru');
-  const filtered = dialogues.filter((item) => Boolean(!item.lastAt) === newDialogueMode
-    && (newDialogueMode || byId('dialogue-filter').value !== 'unread' || item.unreadCount)
-    && [dialogueName(item), item.fullName, item.roleLabel, item.lastText].some((value) => value?.toLocaleLowerCase('ru').includes(query)));
+  const partners = new Set(dialogues.map(({ partnerId }) => partnerId));
+  const candidates = newDialogueMode
+    ? [...dialogues, ...directory.filter(({ partnerId }) => !partners.has(partnerId))]
+      .filter(({ partnerRole }) => partnerRole === byId('dialogue-category').value)
+    : dialogues.filter(({ lastAt, unreadCount }) => lastAt && (byId('dialogue-filter').value !== 'unread' || unreadCount));
+  const filtered = candidates.filter((item) => [dialogueName(item), item.fullName, item.roleLabel, newDialogueMode ? null : item.lastText]
+    .some((value) => value?.toLocaleLowerCase('ru').includes(query)));
   if (!filtered.length) return [element('p', 'empty-state', query ? 'Ничего не найдено.' : newDialogueMode ? 'Новых контактов пока нет.' : 'Диалогов пока нет.')];
   return filtered.map((item) => {
     const button = element('button', 'dialogue-button');
     button.type = 'button';
-    button.id = 'dialogue-' + item.id;
-    button.setAttribute('aria-pressed', String(selectedDialogue === item.id));
+    button.id = item.id === undefined ? 'dialogue-contact-' + item.partnerId : 'dialogue-' + item.id;
+    if (item.id !== undefined) button.setAttribute('aria-pressed', String(selectedDialogue === item.id));
     const avatar = element('span', 'dialogue-avatar', dialogueInitials({ title: item.fullName ?? item.title }));
     avatar.setAttribute('aria-hidden', 'true');
     const summary = element('span', 'dialogue-summary');
@@ -2247,7 +2381,11 @@ function renderDialogues(dialogues) {
       badge.setAttribute('aria-label', 'Непрочитанных сообщений: ' + item.unreadCount);
       meta.append(badge);
     }
-    button.addEventListener('click', (event) => openDialogue(item, event.detail > 0));
+    button.addEventListener('click', (event) => {
+      if (item.id === undefined) {
+        startDialogue(resource('/api/dialogues/contact', item.partnerId), button, byId('dialogue-start-error'), event);
+      } else openDialogue(item, event.detail > 0);
+    });
     return button;
   });
 }
@@ -2305,6 +2443,7 @@ function closeDialogue() {
   byId('dialogue-heading').textContent = 'Переписка';
   byId('dialogue-heading').removeAttribute('title');
   for (const field of ['dialogue-avatar', 'dialogue-role', 'dialogue-error']) byId(field).textContent = '';
+  byId('dialogue-info').removeAttribute('open');
   renderDialogueContact();
   byId('messages-new').hidden = true;
   messageForm.hidden = true;
@@ -2348,7 +2487,13 @@ function renderDialogueMessages(messages, content) {
     }
     if (entry.receipt) {
       const label = item.read ? 'Прочитано' : item.delivered ? 'Доставлено' : 'Сохранено на сервере';
-      entry.receipt.textContent = item.read || item.delivered ? '✓✓' : '✓';
+      const icon = document.createElementNS(svgNamespace, 'svg');
+      icon.setAttribute('viewBox', '0 0 20 14');
+      icon.setAttribute('aria-hidden', 'true');
+      const marks = document.createElementNS(svgNamespace, 'path');
+      marks.setAttribute('d', item.read || item.delivered ? 'M2 7.5 5.5 11 13 3m-3 6.5 1.5 1.5L19 3' : 'M5 7.5 8.5 11 16 3');
+      icon.append(marks);
+      entry.receipt.replaceChildren(icon);
       entry.receipt.title = label;
       entry.receipt.setAttribute('aria-label', label);
       entry.receipt.setAttribute('role', 'img');
@@ -2648,6 +2793,10 @@ async function runSearch(query, account, load) {
 byId('cabinet-retry').addEventListener('click', () => loadCabinet({ fresh: true }));
 byId('dialogue-search').addEventListener('input', refreshDialogueList);
 byId('dialogue-filter').addEventListener('change', refreshDialogueList);
+byId('dialogue-category').addEventListener('change', () => {
+  byId('dialogue-start-error').textContent = '';
+  refreshDialogueList();
+});
 byId('dialogue-back').addEventListener('click', closeDialogue);
 byId('dialogue-new').addEventListener('click', () => setNewDialogueMode(!newDialogueMode));
 byId('messages-new').addEventListener('click', scrollConversationEnd);
@@ -2881,6 +3030,10 @@ for (const button of document.querySelectorAll('.nav-toggle')) {
 }
 
 byId('day-picker').addEventListener('change', (event) => selectDay(event.target.value));
+byId('schedule-week-mode').addEventListener('click', () => setScheduleMode(false));
+byId('schedule-month-mode').addEventListener('click', () => setScheduleMode(true));
+byId('schedule-month').addEventListener('change', loadMonthSchedule);
+byId('month-schedule-retry').addEventListener('click', loadMonthSchedule);
 byId('home-week').addEventListener('change', (event) => selectHomeDay(event.target.value));
 for (const button of document.querySelectorAll('[data-schedule-retry]')) {
   button.addEventListener('click', loadSchedule);
