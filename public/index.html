@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/desktop-tablet.css">
   <link rel="stylesheet" href="/mobile.css">
+  <link rel="stylesheet" href="/login.css">
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -15,29 +16,51 @@
     <p role="status">Проверяем вход…</p>
   </div>
 
-  <main class="login-layout" id="login-screen" hidden>
-    <div class="login-cover">
-      <div class="brand">
+  <main class="login-layout" id="login-screen" data-season="winter" data-tone="night" hidden>
+    <div class="login-scene" aria-hidden="true"></div>
+    <header class="login-header">
+      <div class="brand login-brand">
         <span aria-hidden="true">ЛК</span>
         <span class="visually-hidden">Личный кабинет</span>
       </div>
-      <p class="prototype-notice">Конкурсный прототип. Неофициальный сервис</p>
+      <fieldset class="login-theme" id="login-theme">
+        <legend class="visually-hidden">Оформление страницы входа</legend>
+        <label><input type="radio" name="login-theme" value="auto" checked><span>Авто</span></label>
+        <label><input type="radio" name="login-theme" value="light"><span>Светлая</span></label>
+        <label><input type="radio" name="login-theme" value="dark"><span>Тёмная</span></label>
+      </fieldset>
+    </header>
+    <div class="login-cover">
+      <p class="login-headline">Твоя университетская жизнь <span>— ближе</span></p>
     </div>
-    <section class="login-main" aria-labelledby="login-heading">
-      <div class="login-panel">
-        <h1 id="login-heading" tabindex="-1">Вход в кабинет</h1>
-        <p class="login-intro">Введите логин и пароль демо-аккаунта.</p>
-        <form id="login-form" method="post" action="/api/login">
+    <section class="login-panel" aria-labelledby="login-heading">
+      <h1 id="login-heading" tabindex="-1">Вход в кабинет</h1>
+      <form class="login-form" id="login-form" method="post" action="/api/login">
+        <div class="login-field">
           <label for="login">Логин</label>
-          <input id="login" name="login" autocomplete="username" autocapitalize="none" spellcheck="false" aria-describedby="login-hint" required>
-          <p class="input-hint" id="login-hint">Демо-логины студентов — student1 и student2. Для сотрудников — teacher1 и dean1.</p>
+          <input id="login" name="login" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+        </div>
+        <div class="login-field">
           <label for="password">Пароль</label>
-          <input id="password" name="password" type="password" autocomplete="current-password" required>
-          <p class="form-error" id="login-error" role="alert"></p>
-          <button class="button button-primary" type="submit">Войти</button>
-        </form>
-      </div>
+          <div class="login-password">
+            <input id="password" name="password" type="password" autocomplete="current-password" autocapitalize="none" spellcheck="false" required>
+            <button type="button" class="password-toggle" aria-label="Показать пароль" aria-controls="password" data-password-toggle>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12c2.7-4 6-6 10-6s7.3 2 10 6c-2.7 4-6 6-10 6s-7.3-2-10-6Z"/><circle cx="12" cy="12" r="2.5"/><path class="password-slash" d="m4 4 16 16"/></svg>
+            </button>
+          </div>
+        </div>
+        <p class="form-error" id="login-error" role="alert"></p>
+        <button class="button login-submit" type="submit">Войти</button>
+        <details class="login-demo">
+          <summary>Демо-доступы</summary>
+          <p>Студенты — student1 и student2. Сотрудники — teacher1 и dean1.</p>
+        </details>
+      </form>
     </section>
+    <footer class="login-footer">
+      <p>Конкурсный прототип · Неофициальный сервис</p>
+      <p>Фасад — художественная визуализация</p>
+    </footer>
   </main>
 
   <div class="app-shell" id="app" hidden>

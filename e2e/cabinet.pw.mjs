@@ -67,6 +67,28 @@ async function capture(page, name) {
   await page.screenshot({ path: `test-results/screenshots/${name}-360.png`, animations: 'disabled' });
 }
 
+for (const width of [360, 1440]) {
+  test(`seasonal login at ${width} px`, async ({ page, cabinet }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.clock.setFixedTime(new Date('2026-11-21T16:00:00Z'));
+    await page.goto(cabinet.origin);
+    const scene = page.locator('.login-scene img');
+    await expect(scene).toHaveAttribute('src', '/assets/auth/winter-evening.png');
+    await expect(page.locator('.login-layout')).toHaveCSS('display', 'grid');
+    await fits(page);
+    await page.screenshot({ path: `test-results/screenshots/seasonal-login-${width}.png`, animations: 'disabled' });
+    await page.locator('#login-theme input[value="light"]').check();
+    await expect(scene).toHaveAttribute('src', '/assets/auth/winter-day.png');
+    await page.reload();
+    await expect(scene).toHaveAttribute('src', '/assets/auth/winter-day.png');
+    await page.getByRole('button', { name: 'Показать пароль' }).click();
+    await expect(page.locator('#password')).toHaveAttribute('type', 'text');
+    await page.getByRole('button', { name: 'Скрыть пароль' }).click();
+    await expect(page.locator('#password')).toHaveAttribute('type', 'password');
+    await login(page, cabinet);
+  });
+}
+
 for (const width of [360, 390, 440]) {
   test(`mobile tabs, focus and layout at ${width} px`, async ({ page, cabinet }) => {
     await page.setViewportSize({ width, height: width === 440 ? 450 : 800 });

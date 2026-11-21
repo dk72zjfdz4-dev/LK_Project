@@ -61,6 +61,17 @@ test('student accounts, schedule ownership and session revocation', { timeout: 2
     assert.deepEqual(Buffer.from(await asset.arrayBuffer()), await readFile(new URL('../public/' + file, import.meta.url)));
   }
   for (const path of ['/app.js', '/styles.css']) assert.equal((await request(path)).status, 200);
+  const loginStyles = await request('/login.css');
+  assert.equal(loginStyles.status, 200);
+  assert.match(loginStyles.headers.get('content-type'), /^text\/css\b/);
+  for (const season of ['winter', 'spring', 'summer', 'autumn']) {
+    for (const tone of ['day', 'evening']) {
+      const asset = await request(`/assets/auth/${season}-${tone}.png`, { method: 'HEAD' });
+      assert.equal(asset.status, 200);
+      assert.equal(asset.headers.get('content-type'), 'image/png');
+      assert.equal(asset.headers.get('x-content-type-options'), 'nosniff');
+    }
+  }
   for (const path of ['/server.mjs', '/data/local-demo.env', '/data/student-cabinet.sqlite']) {
     assert.equal((await request(path)).status, 404);
   }

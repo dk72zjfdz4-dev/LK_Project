@@ -114,6 +114,7 @@ const staticFiles = new Map([
   ['/styles.css', ['styles.css', 'text/css']],
   ['/desktop-tablet.css', ['desktop-tablet.css', 'text/css']],
   ['/mobile.css', ['mobile.css', 'text/css']],
+  ['/login.css', ['login.css', 'text/css']],
   ['/certificate-print.css', ['certificate-print.css', 'text/css']],
   ['/certificate-print.js', ['certificate-print.js', 'text/javascript']],
 ]);
@@ -485,14 +486,15 @@ async function api(request, response, path) {
 }
 
 async function staticResponse(request, response, path) {
-  const file = staticFiles.get(path);
+  const loginScene = /^\/assets\/auth\/(winter|spring|summer|autumn)-(day|evening)\.png$/.test(path);
+  const file = loginScene ? [path.slice(1), 'image/png'] : staticFiles.get(path);
   if (!file || !['GET', 'HEAD'].includes(request.method)) return staticError(response, 404);
   const [filename, mediaType] = file;
   const location = await realpath(resolve(publicDirectory, filename));
   if (!isPublicPath(location)) return staticError(response, 404);
   const contents = await readFile(location);
   response.writeHead(200, {
-    'Content-Type': `${mediaType}; charset=utf-8`,
+    'Content-Type': loginScene ? mediaType : `${mediaType}; charset=utf-8`,
     'Content-Length': contents.length,
     'Cache-Control': 'no-cache',
     'Content-Security-Policy': "default-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",

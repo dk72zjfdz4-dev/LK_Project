@@ -28,6 +28,9 @@ const dayFormat = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'lon
 const moscowTimeFormat = new Intl.DateTimeFormat('ru-RU', {
   timeZone: 'Europe/Moscow', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
 });
+const loginTimeFormat = new Intl.DateTimeFormat('en', {
+  timeZone: 'Europe/Moscow', month: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric', hourCycle: 'h23',
+});
 const pointsFormat = new Intl.NumberFormat('ru-RU', { maximumSignificantDigits: 15, useGrouping: false });
 const profileFields = {
   'profile-name': 'fullName',
@@ -264,6 +267,8 @@ function showLogin(message = '', focusHeading = false) {
   byId('app').hidden = true;
   byId('login-screen').hidden = false;
   byId('login-form').reset();
+  setLoginPasswordVisible(false);
+  syncLoginTheme();
   byId('login-error').textContent = message;
   byId('app-error').textContent = '';
   byId('cabinet-status').hidden = true;
@@ -2943,7 +2948,80 @@ byId('library-query').addEventListener('input', renderLibrary);
 byId('library-subject').addEventListener('change', renderLibrary);
 byId('library-favorites').addEventListener('change', renderLibrary);
 
+const loginScreen = byId('login-screen');
+const loginTheme = byId('login-theme');
+const loginScene = loginScreen.querySelector('.login-scene');
+const loginThemeKey = 'cabinet-login-theme';
+let loginThemeTimer;
+let requestedLoginScene;
+
+async function loadLoginScene(src) {
+  if (requestedLoginScene === src) return;
+  requestedLoginScene = src;
+  if (loginScene.firstElementChild?.getAttribute('src') === src) return;
+  const image = new Image();
+  image.alt = '';
+  image.src = src;
+  try {
+    await image.decode();
+    if (requestedLoginScene === src && !loginScreen.hidden) loginScene.replaceChildren(image);
+  } catch {
+    if (requestedLoginScene === src) loginScene.replaceChildren();
+  } finally {
+    if (requestedLoginScene === src) requestedLoginScene = undefined;
+  }
+}
+
+function syncLoginTheme() {
+  window.clearTimeout(loginThemeTimer);
+  if (loginScreen.hidden || document.hidden) return;
+  const now = new Date();
+  const { month, hour, minute, second } = Object.fromEntries(loginTimeFormat.formatToParts(now)
+    .map(({ type, value }) => [type, Number(value)]));
+  const season = month === 11 ? 'winter' : ['winter', 'spring', 'summer', 'autumn'][Math.floor(month % 12 / 3)];
+  const mode = loginTheme.querySelector('input:checked').value;
+  const daytime = hour >= 7 && hour < 18;
+  const night = mode === 'dark' || (mode === 'auto' && !daytime);
+  loginScreen.dataset.season = season;
+  loginScreen.dataset.tone = night ? 'night' : 'day';
+  const src = '/assets/auth/' + season + '-' + (night ? 'evening' : 'day') + '.png';
+  void loadLoginScene(src);
+  const nextHour = mode === 'auto' && hour < 18 ? (daytime ? 18 : 7) : 24;
+  const delay = (((nextHour - hour) * 60 - minute) * 60 - second) * 1000 - now.getMilliseconds();
+  loginThemeTimer = window.setTimeout(syncLoginTheme, delay);
+}
+
+function setLoginPasswordVisible(visible) {
+  byId('password').type = visible ? 'text' : 'password';
+  const toggle = loginScreen.querySelector('[data-password-toggle]');
+  toggle.toggleAttribute('data-visible', visible);
+  toggle.setAttribute('aria-label', visible ? 'Скрыть пароль' : 'Показать пароль');
+}
+
+try {
+  const savedMode = window.localStorage.getItem(loginThemeKey);
+  for (const option of loginTheme.querySelectorAll('input')) {
+    if (option.value === savedMode) option.checked = true;
+  }
+} catch {
+  // Manual selection still works when local storage is unavailable.
+}
+loginTheme.addEventListener('change', (event) => {
+  try {
+    window.localStorage.setItem(loginThemeKey, event.target.value);
+  } catch {
+    // Keep the selection for this page.
+  }
+  syncLoginTheme();
+});
+loginScreen.querySelector('[data-password-toggle]').addEventListener('click', () => {
+  setLoginPasswordVisible(byId('password').type === 'password');
+});
+window.addEventListener('pageshow', syncLoginTheme);
+window.addEventListener('focus', syncLoginTheme);
+
 document.addEventListener('visibilitychange', () => {
+  syncLoginTheme();
   if (document.hidden || !profile || signingOut) return;
   if (profile.role === 'student') loadSchedule({ quiet: true });
   loadCabinet({ quiet: true });
@@ -2954,7 +3032,7 @@ document.addEventListener('visibilitychange', () => {
 byId('login-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
-  const submit = form.querySelector('button');
+  const submit = form.querySelector('button[type="submit"]');
   const data = new FormData(form);
   submit.disabled = true;
   submit.textContent = 'Входим…';
@@ -2966,6 +3044,8 @@ byId('login-form').addEventListener('submit', async (event) => {
       body: JSON.stringify({ login: data.get('login').trim(), password: data.get('password') }),
     });
     form.reset();
+    setLoginPasswordVisible(false);
+    window.clearTimeout(loginThemeTimer);
     showApp(student, true);
   } catch (error) {
     byId('login-error').textContent = error.message;
