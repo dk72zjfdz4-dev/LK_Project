@@ -127,9 +127,9 @@
 .login-header, .login-footer { grid-column: 1 / -1; }
 
 .login-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
 }
 
@@ -190,32 +190,18 @@
 .login-theme label:hover span { color: var(--login-ink); }
 .login-theme input:focus-visible + span { outline: 3px solid var(--login-focus); outline-offset: -2px; }
 
-.login-cover {
-  align-self: start;
-  padding: clamp(28px, 8vh, 96px) 0 0;
-}
-
 .login-headline {
-  max-width: 680px;
   color: var(--login-hero);
-  font: 400 clamp(2.1rem, 4.15vw, 4rem) / 1.08 Georgia, 'Times New Roman', serif;
+  font: 400 clamp(1.35rem, 2.7vw, 2.6rem) / 1.12 Georgia, 'Times New Roman', serif;
   letter-spacing: -.025em;
   text-wrap: balance;
 }
 
 .login-headline span { display: inline-block; color: var(--login-accent); }
 
-.login-layout[data-tone="day"] .login-headline {
-  width: fit-content;
-  padding: .16em .28em .22em;
-  border-radius: 14px;
-  color: #142848;
-  background: rgb(248 252 255 / .9);
-}
-
-.login-layout[data-tone="day"] .login-headline span { color: #204e69; }
-
 .login-panel {
+  grid-column: 2;
+  grid-row: 2;
   align-self: center;
   justify-self: end;
   width: min(100%, 535px);
@@ -307,7 +293,7 @@
 @media (max-width: 740px) {
   .login-layout {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: repeat(5, auto);
+    grid-template-rows: repeat(4, auto);
     align-content: start;
     justify-items: center;
     row-gap: 14px;
@@ -315,12 +301,12 @@
       max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
   }
 
-  .login-header,
-  .login-cover {
+  .login-header {
     width: min(100%, 535px);
+    grid-row: 1;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px 12px;
   }
-
-  .login-header { grid-row: 1; }
 
   .login-scene {
     position: relative;
@@ -338,20 +324,16 @@
   }
 
   .login-brand { width: 44px; height: 44px; border-radius: 12px; }
+  .login-theme { grid-column: 1 / -1; justify-self: end; }
   .login-theme span { min-height: 44px; padding-inline: 9px; font-size: .82rem; }
-  .login-cover {
-    position: relative;
-    margin-block-start: -24px;
-    padding: 0 4px;
-  }
 
   .login-headline {
-    max-width: 400px;
-    font-size: clamp(1.65rem, 5.8vw, 2.3rem);
-    line-height: 1.08;
+    font-size: clamp(1.2rem, 4.1vw, 1.65rem);
   }
 
   .login-panel {
+    grid-column: 1;
+    grid-row: 3;
     justify-self: center;
     margin: 0;
     padding: 17px;
