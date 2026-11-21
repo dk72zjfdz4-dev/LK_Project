@@ -154,10 +154,7 @@
             <span class="sidebar-group" id="sidebar-group"></span>
           </div>
         </a>
-        <button class="logout-button" id="logout" type="button">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3H5a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h5m-1-9h12m-4-4 4 4-4 4"/></svg>
-          Выйти
-        </button>
+        <button class="logout-button" id="logout" type="button">Выйти</button>
       </div>
     </aside>
 
@@ -219,6 +216,9 @@
             <section class="panel home-changes" id="home-changes" data-student-schedule hidden>
               <div class="panel-heading">
                 <h2>Предстоящие изменения</h2>
+                <button type="button" class="inline-link" id="home-changes-toggle" aria-expanded="false" aria-controls="changed-lessons">
+                  <span>Показать все</span><span>Свернуть</span>
+                </button>
               </div>
               <div id="changed-lessons"></div>
             </section>
@@ -450,17 +450,6 @@
 
         <section class="view mobile-menu-page" id="view-menu" aria-label="Дополнительные разделы" hidden>
           <nav class="primary-nav mobile-menu-groups" id="mobile-nav" aria-label="Дополнительные разделы"></nav>
-          <div class="mobile-menu-profile">
-            <div class="sidebar-person">
-              <span class="avatar" id="mobile-menu-initials" aria-hidden="true"></span>
-              <div><strong id="mobile-menu-name"></strong><p class="muted" id="mobile-menu-role"></p></div>
-            </div>
-            <button class="logout-button" id="mobile-logout" type="button">
-              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3H5a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h5m-1-9h12m-4-4 4 4-4 4"/></svg>
-              Выйти
-            </button>
-            <p class="local-error" id="mobile-logout-error" role="alert"></p>
-          </div>
         </section>
 
         <section class="view cabinet-layout" id="view-profile" aria-label="Профиль" hidden>
@@ -498,6 +487,10 @@
             </div>
             <div class="panel" id="portfolio-export" hidden></div>
           </section>
+          <div class="mobile-profile-logout">
+            <button class="logout-button" id="mobile-logout" type="button">Выйти из аккаунта</button>
+            <p class="local-error" id="mobile-logout-error" role="alert"></p>
+          </div>
         </section>
       </main>
 

@@ -1,5 +1,6 @@
 .mobile-tabs,
-.mobile-menu-page {
+.mobile-menu-page,
+.mobile-profile-logout {
   display: none;
 }
 
@@ -114,18 +115,8 @@
   .mobile-menu-groups a + a { border-top: 1px solid var(--glass-edge); }
   .mobile-menu-groups .nav-icon { flex: 0 0 16px; }
 
-  .mobile-menu-profile {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px;
-    align-items: center;
-    padding: 10px;
-    border-top: 1px solid var(--border);
-  }
-
-  .mobile-menu-profile .logout-button { min-height: 44px; }
-  .mobile-menu-profile strong { overflow-wrap: anywhere; }
-  .mobile-menu-profile .local-error { grid-column: 1 / -1; }
+  .mobile-profile-logout { display: block; }
+  .mobile-profile-logout .logout-button { width: 100%; }
   .app-footer { padding-bottom: 68px; }
 
   .help-dock {

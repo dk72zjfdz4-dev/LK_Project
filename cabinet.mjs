@@ -522,8 +522,8 @@ const searchSections = [
   ['profile', 'Профиль'],
 ];
 
-function searchText(value) {
-  return value.normalize('NFC').toLowerCase().replaceAll('ё', 'е').replace(/\s+/g, ' ').trim();
+function searchWords(value) {
+  return value.normalize('NFC').toLowerCase().replaceAll('ё', 'е').match(/[\p{L}\p{N}]+/gu) ?? [];
 }
 
 export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody, json }) {
@@ -801,15 +801,17 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
 
   function search(viewer, query) {
     const results = [];
-    const normalized = searchText(query);
-    if (!normalized) return { results };
-    const words = normalized.split(' ');
+    const words = searchWords(query);
+    if (!words.length) return { results };
+    const shortPrefix = words.length === 1 && words[0].length < 5;
     const { id, role } = viewer;
 
     function add(type, title, view, target, ...fields) {
       if (results.length >= 30) return;
-      const searchable = searchText([title, ...fields].join(' '));
-      if (words.every((word) => searchable.includes(word))) results.push({ type, title, view, id: target });
+      const searchable = searchWords(shortPrefix ? title : [title, ...fields].join(' '));
+      if (words.every((word) => searchable.some((candidate) => candidate.startsWith(word)))) {
+        results.push({ type, title, view, id: target });
+      }
     }
 
     for (const [view, title, roles, keywords] of searchSections) {
@@ -825,8 +827,8 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     }
     if (role === 'student' || role === 'teacher') {
       for (const grade of grades.all(id, role, id, role)) {
-        add('grade', grade.subject, 'grades', `grade-${grade.id}`,
-          grade.studentName, grade.criteria, grade.semester, grade.control, grade.result);
+        add('grade', `${grade.subject} · Семестр ${grade.semester}`, 'grades', `grade-${grade.id}`,
+          grade.studentName, grade.criteria, grade.control, grade.result);
       }
       for (const assignment of assessments.all(id, id)) {
         add('assignment', assignment.title, 'assignments', `assignment-${assignment.id}`,

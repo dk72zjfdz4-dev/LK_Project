@@ -59,6 +59,44 @@ async function expandGroup(navigation, name) {
   if (await button.getAttribute('aria-expanded') === 'false') await button.click();
 }
 
+test('home shows two upcoming changes until expanded', async ({ page, cabinet }) => {
+  const changes = [24, 25, 26].map((day) => ({
+    id: String(day), date: `2026-11-${day}`, start: '10:40', end: '12:00',
+    title: `Занятие ${day}`, room: 'А-204', teacher: 'Преподаватель', change: 'Аудитория изменена.',
+  }));
+  let nextWeekLessons = [...changes].reverse();
+  await page.route('**/api/schedule', (route) => route.fulfill({
+    json: { today: '2026-11-22', weekStart: '2026-11-16', lessons: [], nextWeekLessons },
+  }));
+  await login(page, cabinet);
+  const panel = page.locator('#home-changes');
+  const rows = panel.getByRole('listitem');
+  const toggle = panel.getByRole('button', { name: 'Показать все' });
+  const requests = page.locator('#stat-requests');
+  const bottom = (locator) => locator.evaluate((element) => element.getBoundingClientRect().bottom);
+  const bottomGap = async () => (await bottom(panel)) - (await bottom(requests));
+  await expect(requests).toBeVisible();
+  await expect(rows).toHaveCount(2);
+  await expect.poll(bottomGap).toBeCloseTo(0, 0);
+  await expect(rows.first()).toContainText('Занятие 24');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await toggle.press('Enter');
+  await expect(rows).toHaveCount(3);
+  await expect(rows.last()).toContainText('Занятие 26');
+  const collapse = panel.getByRole('button', { name: 'Свернуть' });
+  await expect(collapse).toHaveAttribute('aria-expanded', 'true');
+  await collapse.click();
+  await expect(rows).toHaveCount(2);
+
+  nextWeekLessons = changes.slice(0, 2);
+  await page.reload();
+  await expect(rows).toHaveCount(2);
+  await expect(panel.locator('#home-changes-toggle')).toBeHidden();
+  await expect.poll(bottomGap).toBeCloseTo(0, 0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect((await panel.boundingBox()).y).toBeGreaterThan(await bottom(requests));
+});
+
 async function fits(page) {
   expect(await page.evaluate(() => globalThis.document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize().width);
 }
@@ -136,8 +174,8 @@ for (const width of [360, 390, 440]) {
     await expandGroup(menu, 'Кампус');
     await expect(menu.getByRole('link', { name: 'Справки и документы' })).toBeVisible();
     if (width === 360) await capture(page, 'menu');
-    await menu.getByRole('button', { name: 'Выйти' }).scrollIntoViewIfNeeded();
-    await expect(menu.getByRole('button', { name: 'Выйти' })).toBeInViewport();
+    await expect(menu.getByRole('button', { name: /Выйти/ })).toHaveCount(0);
+    await expect(menu.getByText('Нюша Мироновна Романова')).toHaveCount(0);
     const contacts = menu.getByRole('link', { name: 'Контакты' });
     await contacts.scrollIntoViewIfNeeded();
     const menuPosition = await page.evaluate(() => globalThis.scrollY);
@@ -153,6 +191,18 @@ for (const width of [360, 390, 440]) {
     await expect(helper.getByRole('combobox', { name: 'Вопрос о кабинете' })).toBeVisible();
     await helper.getByRole('button', { name: 'Закрыть помощника' }).click();
     await expect(helper).toBeHidden();
+    await tabs.getByRole('link', { name: 'Профиль' }).click();
+    const profile = page.locator('#view-profile');
+    const logout = profile.getByRole('button', { name: 'Выйти из аккаунта' });
+    await logout.scrollIntoViewIfNeeded();
+    await expect(logout).toBeInViewport();
+    if (width === 360) {
+      await page.route('**/api/logout', (route) => route.fulfill({ status: 500, json: { error: 'Не удалось выйти.' } }), { times: 1 });
+      await logout.click();
+      await expect(profile.getByRole('alert')).toHaveText('Не удалось выйти.');
+      await logout.click();
+      await expect(page.getByRole('heading', { name: 'Вход в кабинет' })).toBeVisible();
+    }
   });
 }
 
@@ -206,6 +256,30 @@ test('teacher login and role-specific navigation', async ({ page, cabinet }) => 
   await expandGroup(navigation, 'Учёба');
   await expect(navigation.getByRole('link', { name: 'Задания' })).toBeVisible();
   await expect(navigation.getByRole('link', { name: 'Справки и документы' })).toHaveCount(0);
+});
+
+test('header search matches word prefixes and links to the chosen semester', async ({ page, cabinet }) => {
+  await login(page, cabinet);
+  const search = page.getByRole('searchbox', { name: 'Поиск по кабинету' });
+  const results = page.locator('#search-results');
+  await search.fill('рас');
+  await expect(results.getByRole('link')).toHaveCount(2);
+  await expect(results.getByRole('link', { name: /Где посмотреть расписание/ })).toBeVisible();
+  await expect(results).toHaveCSS('background-color', 'rgb(249, 252, 255)');
+
+  await search.fill('р');
+  await expect(results.getByRole('link', { name: /^Расписание/ })).toBeVisible();
+  await expect(results.getByRole('link', { name: /Астрономия/ })).toHaveCount(0);
+
+  for (const semester of [1, 2]) {
+    await search.fill('трав');
+    await expect(results.getByRole('link')).toHaveCount(2);
+    const link = results.getByRole('link', { name: new RegExp(`Травология · Семестр ${semester}`) });
+    const target = await link.getAttribute('href');
+    await link.click();
+    await expect(page.locator(`#grade-semester-${semester}`)).toHaveJSProperty('open', true);
+    await expect(page.locator('#' + target.split('/').at(-1))).toHaveJSProperty('open', true);
+  }
 });
 
 test('mobile search opens the document form and campus opens the chosen card', async ({ page, cabinet }) => {
@@ -879,6 +953,8 @@ for (const [width, height] of [[768, 1024], [1024, 768], [1440, 980]]) {
     const nav = page.locator('.sidebar nav');
     await expect(nav).toBeVisible();
     await expect(page.locator('.mobile-tabs')).toBeHidden();
+    await expect(page.locator('#sidebar-name')).toHaveJSProperty('innerText', 'Нюша\nМироновна\nРоманова');
+    await expect(page.locator('.sidebar').getByRole('button', { name: 'Выйти', exact: true })).toBeVisible();
     await expandGroup(nav, 'Учёба');
     await expandGroup(nav, 'Сервисы');
     await expect(nav.getByRole('link', { name: 'Расписание' })).toBeVisible();

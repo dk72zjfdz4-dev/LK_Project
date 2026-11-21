@@ -300,7 +300,7 @@ function showLogin(message = '', focusHeading = false) {
   for (const id of [
     ...Object.keys(profileFields),
     'sidebar-name', 'sidebar-initials', 'profile-initials', 'welcome-name',
-    'mobile-avatar', 'mobile-menu-initials', 'mobile-menu-name', 'mobile-menu-role', 'mobile-logout-error',
+    'mobile-avatar', 'mobile-logout-error',
   ]) {
     byId(id).textContent = '';
   }
@@ -322,12 +322,9 @@ function showApp(account, focusHeading = false) {
   const roleName = roleNames[profile.role];
   const groupOrRole = profile.role === 'student' ? account.group || roleName : roleName;
   byId('mobile-avatar').textContent = initials;
-  byId('mobile-menu-initials').textContent = initials;
-  byId('mobile-menu-name').textContent = account.fullName;
-  byId('mobile-menu-role').textContent = groupOrRole;
   byId('sidebar-initials').textContent = initials;
   byId('profile-initials').textContent = initials;
-  byId('sidebar-name').textContent = account.fullName;
+  byId('sidebar-name').textContent = account.fullName.trim().replace(/\s+/g, '\n');
   byId('welcome-name').textContent = (profile.role === 'student' ? 'Привет, ' : 'Здравствуйте, ') + (account.firstName || account.fullName) + '!';
   byId('profile-role').textContent = roleName;
   byId('sidebar-group').textContent = groupOrRole;
@@ -335,6 +332,7 @@ function showApp(account, focusHeading = false) {
   byId('home-status').hidden = true;
   byId('home-upcoming').hidden = true;
   byId('home-changes').hidden = true;
+  byId('home-changes-toggle').ariaExpanded = 'false';
   byId('home-week').closest('section').hidden = true;
   byId('session-loading').hidden = true;
   byId('login-screen').hidden = true;
@@ -2750,16 +2748,16 @@ function scheduleSearch(delay) {
 
 function highlightSearch(title, query) {
   const label = element('span');
-  const words = [...new Set(query.normalize('NFC').toLowerCase().replaceAll('ё', 'е').split(/\s+/).filter(Boolean))];
+  const words = [...new Set(query.normalize('NFC').toLowerCase().replaceAll('ё', 'е').match(/[\p{L}\p{N}]+/gu))];
   if (!words.length) {
     label.textContent = title;
     return label;
   }
   words.sort((a, b) => b.length - a.length);
-  const expression = words.map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replaceAll('е', '[её]')).join('|');
+  const expression = words.map((word) => word.replaceAll('е', '[её]')).join('|');
   const text = title.normalize('NFC');
   let start = 0;
-  for (const match of text.matchAll(new RegExp(expression, 'giu'))) {
+  for (const match of text.matchAll(new RegExp(`(?<![\\p{L}\\p{N}])(?:${expression})`, 'giu'))) {
     label.append(text.slice(start, match.index), element('mark', 'search-match', match[0]));
     start = match.index + match[0].length;
   }
@@ -3055,7 +3053,7 @@ byId('login-form').addEventListener('submit', async (event) => {
   }
 });
 
-async function logout() {
+async function logout({ currentTarget }) {
   if (signingOut) return;
   const buttons = [byId('logout'), byId('mobile-logout')];
   const mobileError = byId('mobile-logout-error');
@@ -3071,7 +3069,8 @@ async function logout() {
     if (error.status === 401) {
       showLogin('', true);
     } else {
-      (activeView === 'menu' ? mobileError : byId('app-error')).textContent = error.message;
+      const message = currentTarget.id === 'mobile-logout' && activeView === 'profile' ? mobileError : byId('app-error');
+      message.textContent = error.message;
     }
   } finally {
     signingOut = false;
@@ -3114,6 +3113,10 @@ byId('schedule-week-mode').addEventListener('click', () => setScheduleMode(false
 byId('schedule-month-mode').addEventListener('click', () => setScheduleMode(true));
 byId('schedule-month').addEventListener('change', loadMonthSchedule);
 byId('month-schedule-retry').addEventListener('click', loadMonthSchedule);
+
+byId('home-changes-toggle').addEventListener('click', ({ currentTarget }) => {
+  currentTarget.ariaExpanded = String(currentTarget.ariaExpanded !== 'true');
+});
 byId('home-week').addEventListener('change', (event) => selectHomeDay(event.target.value));
 for (const button of document.querySelectorAll('[data-schedule-retry]')) {
   button.addEventListener('click', loadSchedule);
