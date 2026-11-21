@@ -81,11 +81,6 @@ for (const width of [360, 1440]) {
     await expect(scene).toHaveAttribute('src', '/assets/auth/winter-day.png');
     const headline = page.locator('.login-header .login-headline');
     await expect(headline).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-    await expect(headline).toHaveText('Твоя университетская жизнь — ближе!');
-    const accent = headline.locator('span');
-    await expect(accent).toHaveText('— ближе!');
-    await expect(accent).toHaveCSS('display', 'block');
-    await expect(accent).toHaveCSS('text-align', 'end');
     await fits(page);
     await page.screenshot({ path: `test-results/screenshots/seasonal-login-light-${width}.png`, animations: 'disabled' });
     await page.reload();

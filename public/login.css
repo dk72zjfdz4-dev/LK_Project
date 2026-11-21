@@ -191,14 +191,13 @@
 .login-theme input:focus-visible + span { outline: 3px solid var(--login-focus); outline-offset: -2px; }
 
 .login-headline {
-  width: fit-content;
   color: var(--login-hero);
   font: 400 clamp(1.35rem, 2.7vw, 2.6rem) / 1.12 Georgia, 'Times New Roman', serif;
   letter-spacing: -.025em;
   text-wrap: balance;
 }
 
-.login-headline span { display: block; text-align: end; color: var(--login-accent); }
+.login-headline span { display: inline-block; color: var(--login-accent); }
 
 .login-panel {
   grid-column: 2;
