@@ -548,6 +548,87 @@ test('message receipt visibility and retry after lost response in independent se
   }
 });
 
+test('message deletion distinguishes delivery from reading and respects ownership', async ({ page, browser, cabinet }) => {
+  const recipient = await browser.newContext({ viewport: { width: 360, height: 720 } });
+  const outsider = await browser.newContext();
+  try {
+    const dean = await recipient.newPage();
+    const otherStudent = await outsider.newPage();
+    await login(page, cabinet);
+    await login(dean, cabinet, 'dean');
+    await login(otherStudent, cabinet, 'other');
+
+    for (const [asset, mime] of [['styles.css', 'text/css'], ['app.js', 'text/javascript']]) {
+      const response = await page.request.get(cabinet.origin + '/' + asset);
+      expect(response.status()).toBe(200);
+      expect(response.headers()['content-type']).toContain(mime);
+    }
+    await page.locator('#header-inbox').click();
+    const dialogue = page.locator('#dialogues-content button').filter({ hasText: 'Деканат' });
+    await dialogue.click();
+    const id = (await dialogue.getAttribute('id')).split('-').at(-1);
+    const thread = '/api/dialogues/' + id;
+    const get = async (client, path) => (await client.get(cabinet.origin + path)).json();
+    const post = async (client, path, data, status = 200) => {
+      const response = await client.post(cabinet.origin + path, { headers: { Origin: cabinet.origin }, data });
+      expect(response.status(), await response.text()).toBe(status);
+      return response.json();
+    };
+    const remove = (client, item, scope, status) => post(client, thread + '/messages/' + item.id + '/delete', { scope }, status);
+    const send = async (text) => {
+      const outgoing = { text, clientId: randomBytes(12).toString('hex') };
+      const { message } = await post(page.request, thread + '/messages', outgoing);
+      return { message, outgoing };
+    };
+    const row = (tab, item) => tab.locator('[data-message-id="' + item.id + '"]');
+    const menu = (tab, item) => row(tab, item).getByLabel('Действия сообщения');
+    const visibleTo = async (client, item) => (await get(client, thread)).messages.some(({ id }) => id === item.id);
+    const previewFor = async (client) => (await get(client, '/api/cabinet')).dialogues.find((dialogue) => dialogue.id === Number(id));
+
+    const { message: delivered, outgoing } = await send('Удалить после доставки');
+    await post(dean.request, thread + '/delivered', { messageIds: [delivered.id] });
+    await page.evaluate(() => globalThis.document.dispatchEvent(new Event('visibilitychange')));
+    await expect(row(page, delivered).getByRole('img', { name: 'Доставлено' })).toBeVisible();
+    await remove(dean.request, delivered, 'all', 403);
+    await remove(otherStudent.request, delivered, 'self', 404);
+    await menu(page, delivered).focus();
+    await menu(page, delivered).press('Enter');
+    const removeForAll = row(page, delivered).getByRole('button', { name: 'Удалить у всех' });
+    await expect(removeForAll).toHaveCSS('min-height', '44px');
+    page.once('dialog', (confirmation) => confirmation.accept());
+    await removeForAll.click();
+    await expect(row(page, delivered)).toHaveCount(0);
+    expect(await visibleTo(dean.request, delivered)).toBe(false);
+    expect((await previewFor(dean.request)).lastText).not.toBe(outgoing.text);
+    await remove(page.request, delivered, 'all');
+    await post(page.request, thread + '/messages', outgoing, 410);
+    await post(dean.request, thread + '/read', { messageIds: [delivered.id] });
+
+    const { message: read } = await send('Останется у автора после удаления у получателя');
+    await dean.locator('#header-inbox').click();
+    await dean.locator('#dialogues-content button').filter({ hasText: 'Нюша' }).click();
+    await expect.poll(async () => (await get(page.request, thread)).messages.find(({ id }) => id === read.id)?.read).toBe(true);
+    await page.evaluate(() => globalThis.document.dispatchEvent(new Event('visibilitychange')));
+    await expect(row(page, read).getByRole('img', { name: 'Прочитано' })).toBeVisible();
+    await remove(page.request, read, 'all', 409);
+    await menu(page, read).click();
+    await expect(row(page, read).getByRole('button', { name: 'Удалить у меня' })).toBeVisible();
+    await expect(row(page, read).getByRole('button', { name: 'Удалить у всех' })).toHaveCount(0);
+    await menu(page, read).press('Escape');
+    await expect(menu(page, read)).toBeFocused();
+    await menu(dean, read).click();
+    await expect(row(dean, read).getByRole('button', { name: 'Удалить у всех' })).toHaveCount(0);
+    await row(dean, read).getByRole('button', { name: 'Удалить у меня' }).click();
+    await expect(row(dean, read)).toHaveCount(0);
+    expect(await visibleTo(dean.request, read)).toBe(false);
+    expect(await visibleTo(page.request, read)).toBe(true);
+    await fits(dean);
+  } finally {
+    await outsider.close();
+    await recipient.close();
+  }
+});
+
 for (const width of [360, 440]) {
   test(`teacher chat, grades and ready certificate at ${width} px`, async ({ page, browser, cabinet }) => {
     await page.setViewportSize({ width, height: 800 });

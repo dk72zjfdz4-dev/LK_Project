@@ -1352,6 +1352,51 @@ details[open] > .record-summary::before { transform: rotate(45deg); }
   background: var(--lavender);
 }
 .conversation .message .record-copy { margin: 0; font-size: .92rem; }
+.conversation .message:has(.message-actions) {
+  position: relative;
+  min-width: min(170px, 100%);
+  min-height: 50px;
+  padding-inline-end: 56px;
+}
+.message-actions { position: absolute; inset-inline-end: 4px; inset-block-start: 3px; }
+.message-actions summary {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  min-height: 44px;
+  border-radius: 8px;
+  cursor: pointer;
+  list-style: none;
+  opacity: 0;
+}
+.message-actions summary::-webkit-details-marker { display: none; }
+.message:is(:hover, :focus-within) .message-actions summary, .message-actions[open] summary { opacity: 1; }
+.message-actions[open] { z-index: 3; }
+.message-action-list {
+  position: absolute;
+  inset-inline-end: 0;
+  inset-block-start: 100%;
+  width: 164px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--glass-shadow);
+}
+.message-action-list button {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  text-align: start;
+}
+.message-action-list button:hover { background: var(--glass); }
+.message-delete-error:empty { display: none; }
+@media (max-width: 680px), (hover: none) { .message-actions summary { opacity: 1; } }
 .message-label { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 2px 5px; margin-top: 3px; color: var(--muted); font-size: .72rem; }
 .message-receipt { color: var(--muted); text-align: end; font-size: .72rem; }
 .message-receipt.receipt-read { color: #24763d; }

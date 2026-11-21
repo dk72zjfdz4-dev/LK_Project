@@ -330,6 +330,8 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
     UPDATE students SET full_name = 'Даниил Андреевич Речин' WHERE login = 'student2';
     DELETE FROM students WHERE directory_only = 1;
     UPDATE assignments SET due_at = '2026-11-21T20:00:00.000Z' WHERE title = 'Отчёт по практикуму';
+    DROP TABLE hidden_messages;
+    ALTER TABLE messages DROP COLUMN deleted_for_all;
     PRAGMA user_version = 7;
   `);
   legacyDb.close();

@@ -2457,6 +2457,71 @@ function closeDialogue() {
   if (id !== undefined) (byId('dialogue-' + id) ?? byId('dialogue-search')).focus({ preventScroll: true });
 }
 
+function messageActions(item) {
+  const details = element('details', 'message-actions');
+  const summary = element('summary', '', '…');
+  summary.setAttribute('aria-label', 'Действия сообщения');
+  const actions = element('div', 'message-action-list');
+  const errorOutput = element('p', 'local-error message-delete-error');
+  errorOutput.setAttribute('role', 'alert');
+  const buttons = [];
+  for (const [scope, title] of [['self', 'Удалить у меня'], ...(item.mine ? [['all', 'Удалить у всех']] : [])]) {
+    const button = element('button', '', title);
+    button.type = 'button';
+    button.dataset.scope = scope;
+    buttons.push(button);
+    button.addEventListener('click', async () => {
+      if (scope === 'all' && !window.confirm('Удалить сообщение у всех участников? Это действие нельзя отменить.')) return;
+      const account = profile;
+      const dialogue = selectedDialogue;
+      const current = () => profile === account && selectedDialogue === dialogue && activeView === 'messages';
+      for (const control of buttons) control.disabled = true;
+      errorOutput.textContent = '';
+      try {
+        await post(resource('/api/dialogues', dialogue, '/messages/' + item.id + '/delete'), { scope });
+        if (profile !== account) return;
+        const state = messageStates.get(dialogue);
+        if (state?.outgoing && state.outgoing.clientId === item.clientId) {
+          if (state.text === state.outgoingDraft) state.text = '';
+          state.outgoing = undefined;
+          state.error = '';
+        }
+        if (current()) {
+          receivedMessages = receivedMessages.filter(({ id }) => id !== item.id);
+          renderDialogueMessages(receivedMessages, byId('messages-content'));
+          syncComposer();
+          void refreshDialogue(true, true);
+          byId('action-status').textContent = 'Сообщение удалено.';
+        }
+        void loadCabinet({ quiet: true, fresh: true });
+      } catch (error) {
+        if (profile === account && !endSession(error) && current()) {
+          errorOutput.textContent = error.message;
+          if (error.status === 409) void refreshDialogue(true, true);
+        }
+      } finally {
+        for (const control of buttons) control.disabled = false;
+      }
+    });
+    actions.append(button);
+  }
+  actions.append(errorOutput);
+  details.append(summary, actions);
+  details.addEventListener('toggle', () => {
+    if (!details.open) return;
+    for (const other of document.querySelectorAll('.message-actions[open]')) if (other !== details) other.open = false;
+    actions.scrollIntoView({ block: 'nearest' });
+  });
+  details.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !details.open) return;
+    event.preventDefault();
+    event.stopPropagation();
+    details.open = false;
+    summary.focus();
+  });
+  return details;
+}
+
 function renderDialogueMessages(messages, content) {
   let list = content.querySelector('ul');
   if (!list) {
@@ -2464,6 +2529,17 @@ function renderDialogueMessages(messages, content) {
     content.replaceChildren(list);
   }
   list.querySelector('.message-pending')?.remove();
+  list.querySelector('.empty-state')?.remove();
+  const ids = new Set(messages.map(({ id }) => id));
+  for (const [id, entry] of renderedMessages) {
+    if (ids.has(id)) continue;
+    if (entry.row.contains(document.activeElement)) messageText.focus({ preventScroll: true });
+    entry.row.remove();
+    renderedMessages.delete(id);
+  }
+  for (const heading of list.querySelectorAll('.message-day')) {
+    if (!heading.nextElementSibling?.matches('[data-message-id]')) heading.remove();
+  }
   let lastDay = list.lastElementChild?.dataset.day;
   for (const item of messages) {
     let entry = renderedMessages.get(item.id);
@@ -2481,14 +2557,19 @@ function renderDialogueMessages(messages, content) {
       const receipt = item.mine ? element('span', 'message-receipt') : null;
       label.append(sentAt);
       if (receipt) label.append(receipt);
-      message.append(element('p', 'record-copy', item.text), label);
+      const actions = messageActions(item);
+      message.append(element('p', 'record-copy', item.text), label, actions);
       row.append(message);
-      entry = { row, receipt };
+      entry = { row, receipt, deleteForAll: actions.querySelector('[data-scope="all"]') };
       renderedMessages.set(item.id, entry);
       row.dataset.messageId = item.id;
       list.append(row);
     }
     if (entry.receipt) {
+      if (item.read && entry.deleteForAll === document.activeElement) {
+        entry.deleteForAll.closest('details').querySelector('summary').focus({ preventScroll: true });
+      }
+      entry.deleteForAll.hidden = item.read;
       const label = item.read ? 'Прочитано' : item.delivered ? 'Доставлено' : 'Сохранено на сервере';
       const icon = document.createElementNS(svgNamespace, 'svg');
       icon.setAttribute('viewBox', '0 0 20 14');
@@ -2525,7 +2606,6 @@ function renderDialogueMessages(messages, content) {
     list.append(row);
   }
   if (!list.children.length) list.append(element('li', 'empty-state', 'В этом диалоге ещё нет сообщений.'));
-  else if (list.children.length > 1) list.querySelector('.empty-state')?.remove();
 }
 
 function atConversationEnd(content) {
@@ -2676,23 +2756,27 @@ async function sendMessage(event, retry = false) {
   renderDialogueMessages(receivedMessages, byId('messages-content'));
   scrollConversationEnd();
   try {
-    const { message } = await post(resource('/api/dialogues', id, '/messages'), state.outgoing);
+    await post(resource('/api/dialogues', id, '/messages'), state.outgoing);
     if (profile !== account) return;
     if (state.text === state.outgoingDraft) state.text = '';
     state.outgoing = undefined;
     if (current()) {
       setNewDialogueMode(false);
       await refreshDialogue(false, true);
-      if (current() && message && !receivedMessages.some(({ id }) => id === message.id)) {
-        receivedMessages.push(message);
-        renderDialogueMessages(receivedMessages, byId('messages-content'));
-        scrollConversationEnd();
-      }
     }
     byId('action-status').textContent = 'Сообщение отправлено.';
     loadCabinet({ quiet: true, fresh: true });
   } catch (error) {
-    if (profile === account && !endSession(error)) state.error = 'Не удалось подтвердить отправку.';
+    if (profile === account && !endSession(error)) {
+      if (error.status === 410) {
+        if (state.text === state.outgoingDraft) state.text = '';
+        state.outgoing = undefined;
+        state.error = error.message;
+        if (current()) void refreshDialogue(true, true);
+      } else {
+        state.error = 'Не удалось подтвердить отправку.';
+      }
+    }
   } finally {
     state.sending = false;
     if (current()) {
@@ -2900,6 +2984,9 @@ function navigateFromLink(hash, event) {
 }
 
 document.addEventListener('click', (event) => {
+  for (const actions of document.querySelectorAll('.message-actions[open]')) {
+    if (!actions.contains(event.target)) actions.open = false;
+  }
   const link = event.target.closest('.sidebar a[data-view], .mobile-tabs a, #mobile-nav a, #mobile-avatar, #help-dialog a[href^="#"], #header-inbox');
   if (!link || event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();

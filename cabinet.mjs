@@ -406,6 +406,15 @@ export function seedCabinet(db) {
     setNovemberCancellation(db);
     db.exec('PRAGMA user_version = 11');
   }
+  if (version < 12) db.exec(`
+    ALTER TABLE messages ADD COLUMN deleted_for_all INTEGER NOT NULL DEFAULT 0 CHECK (deleted_for_all IN (0, 1));
+    CREATE TABLE hidden_messages (
+      message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+      account_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      PRIMARY KEY (message_id, account_id)
+    ) STRICT;
+    PRAGMA user_version = 12;
+  `);
 }
 
 function isPdf(contents) {
@@ -563,6 +572,9 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
   const createHistory = prepare('INSERT INTO request_history (request_id, status, note, created_at) VALUES (?, ?, ?, ?)');
   const updateRequest = prepare('UPDATE requests SET status = ? WHERE id = ?');
   const dean = prepare("SELECT id FROM students WHERE role = 'dean'");
+  const messageVisibility = `m.deleted_for_all = 0 AND NOT EXISTS (
+    SELECT 1 FROM hidden_messages h WHERE h.message_id = m.id AND h.account_id = :viewerId
+  )`;
   const dialogues = prepare(`
     SELECT d.id,
       partner.id AS partnerId, partner.role AS partnerRole,
@@ -573,10 +585,12 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
         ELSE COALESCE(NULLIF(TRIM(partner.student_group), ''), 'Студент') END AS roleLabel,
       last.text AS lastText, last.sender_id = :viewerId AS lastMine, last.created_at AS lastAt,
       (SELECT COUNT(*) FROM messages m WHERE m.dialogue_id = d.id AND m.sender_id <> :viewerId
-        AND m.is_read = 0) AS unreadCount
+        AND m.is_read = 0 AND ${messageVisibility}) AS unreadCount
     FROM dialogues d
     JOIN students partner ON partner.id = CASE WHEN d.student_id = :viewerId THEN d.staff_id ELSE d.student_id END
-    LEFT JOIN messages last ON last.id = (SELECT m.id FROM messages m WHERE m.dialogue_id = d.id ORDER BY m.id DESC LIMIT 1)
+    LEFT JOIN messages last ON last.id = (
+      SELECT m.id FROM messages m WHERE m.dialogue_id = d.id AND ${messageVisibility} ORDER BY m.id DESC LIMIT 1
+    )
     WHERE d.student_id = :viewerId OR d.staff_id = :viewerId
     ORDER BY last.created_at DESC, last.id DESC, d.id
   `);
@@ -627,18 +641,31 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
       m.is_delivered AS delivered, m.is_read AS read,
       CASE WHEN m.sender_id = :viewerId THEN m.client_id END AS clientId
     FROM messages m JOIN students sender ON sender.id = m.sender_id
-    WHERE m.dialogue_id = :dialogueId
+    WHERE m.dialogue_id = :dialogueId AND ${messageVisibility}
   `;
   const messages = prepare(`${messageFields} ORDER BY m.id`);
   const writtenMessage = prepare(`${messageFields} AND m.id = :messageId`);
   const sentWithClientId = prepare(`${messageFields} AND m.sender_id = :viewerId AND m.client_id = :clientId`);
   const setReceipt = prepare(`
-    UPDATE messages SET is_delivered = 1, is_read = MAX(is_read, ?)
-    WHERE id = ? AND dialogue_id = ? AND sender_id <> ?
+    UPDATE messages AS m SET
+      is_delivered = CASE WHEN ${messageVisibility} THEN 1 ELSE is_delivered END,
+      is_read = CASE WHEN ${messageVisibility} THEN MAX(is_read, :read) ELSE is_read END
+    WHERE id = :messageId AND dialogue_id = :dialogueId AND sender_id <> :viewerId
   `);
   const sendMessage = prepare(`
     INSERT INTO messages (dialogue_id, sender_id, text, created_at, client_id) VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(dialogue_id, sender_id, client_id) DO NOTHING RETURNING id
+  `);
+  const messageForDeletion = prepare(`
+    SELECT sender_id, deleted_for_all FROM messages WHERE dialogue_id = ? AND id = ?
+  `);
+  const hideMessage = prepare(`
+    INSERT INTO hidden_messages (message_id, account_id) VALUES (?, ?)
+    ON CONFLICT(message_id, account_id) DO NOTHING
+  `);
+  const deleteMessageForAll = prepare(`
+    UPDATE messages SET deleted_for_all = 1, text = ''
+    WHERE dialogue_id = ? AND id = ? AND sender_id = ? AND is_read = 0 AND deleted_for_all = 0
   `);
   const notifications = prepare(`
     SELECT id, title, text, created_at AS createdAt FROM notifications WHERE account_id = ? ORDER BY id DESC
@@ -927,7 +954,9 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
       throw new HttpError(400, 'Укажите список идентификаторов сообщений.');
     }
     for (const messageId of new Set(messageIds)) {
-      if (!setReceipt.run(read, messageId, id, viewer.id).changes) throw new HttpError(404, 'Сообщение не найдено.');
+      if (!setReceipt.run({ read, messageId, dialogueId: id, viewerId: viewer.id }).changes) {
+        throw new HttpError(404, 'Сообщение не найдено.');
+      }
     }
   }
 
@@ -952,8 +981,24 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     const message = inserted
       ? writtenMessage.get({ ...lookup, messageId: inserted.id })
       : sentWithClientId.get({ ...lookup, clientId });
+    if (!message) throw new HttpError(410, 'Сообщение удалено.');
     if (message.text !== content) throw new HttpError(409, 'Идентификатор отправки уже использован.');
     return { message: messageView(message) };
+  }
+
+  function deleteMessage(viewer, dialogueId, { scope }, messageId) {
+    ownedDialogue(viewer, dialogueId);
+    if (scope !== 'self' && scope !== 'all') throw new HttpError(400, 'Укажите, для кого удалить сообщение.');
+    const message = found(messageForDeletion.get(dialogueId, messageId), 'Сообщение не найдено.');
+    if (scope === 'all' && message.sender_id !== viewer.id) {
+      throw new HttpError(403, 'Удалить сообщение у всех может только отправитель.');
+    }
+    if (message.deleted_for_all) return;
+    if (scope === 'self') {
+      hideMessage.run(messageId, viewer.id);
+    } else if (!deleteMessageForAll.run(dialogueId, messageId, viewer.id).changes) {
+      throw new HttpError(409, 'Получатель уже прочитал сообщение.');
+    }
   }
 
   function assignWork(viewer, _id, body) {
@@ -1079,6 +1124,7 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     { method: 'POST', path: /^\/api\/dialogues\/([^/]+)\/delivered$/, action: deliverMessages },
     { method: 'POST', path: /^\/api\/dialogues\/([^/]+)\/read$/, action: readDialogue },
     { method: 'POST', path: /^\/api\/dialogues\/([^/]+)\/messages$/, action: writeMessage },
+    { method: 'POST', path: /^\/api\/dialogues\/([^/]+)\/messages\/([^/]+)\/delete$/, action: deleteMessage },
     { method: 'POST', path: /^\/api\/assignments$/, role: 'teacher', action: assignWork },
     { method: 'POST', path: /^\/api\/assignments\/([^/]+)\/submission$/, role: 'student', parse: upload, action: submitWork },
     { method: 'GET', path: /^\/api\/submissions\/([^/]+)\/file$/, download: true, action: workFile },
@@ -1092,17 +1138,18 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     for (const route of routes) {
       if (route.method !== method) continue;
       const matched = route.path.exec(path);
-      if (matched) return { route, identifier: matched[1] };
+      if (matched) return { route, identifiers: matched.slice(1) };
     }
     return null;
   }
 
-  async function handle({ route, identifier }, request, response, viewer, authenticate) {
+  async function handle({ route, identifiers }, request, response, viewer, authenticate) {
     if (route.role && route.role !== viewer.role) throw new HttpError(403, 'Действие недоступно для вашей роли.');
-    const id = identifier === undefined ? undefined : Number(identifier);
-    if (identifier !== undefined && (!/^[1-9]\d*$/.test(identifier) || !Number.isSafeInteger(id))) {
-      throw new HttpError(404, 'Запись не найдена.');
-    }
+    const [id, relatedId] = identifiers.map((identifier) => {
+      const value = Number(identifier);
+      if (!/^[1-9]\d*$/.test(identifier) || !Number.isSafeInteger(value)) throw new HttpError(404, 'Запись не найдена.');
+      return value;
+    });
     if (route.method === 'POST') {
       const data = route.parse ? await route.parse(request, viewer, id) : await jsonBody(request, 16 * 1024);
       if (!data || typeof data !== 'object' || Array.isArray(data)) throw new HttpError(400, 'Ожидается объект JSON.');
@@ -1111,7 +1158,7 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
         if (route.role && route.role !== authenticated.role) {
           throw new HttpError(403, 'Действие недоступно для вашей роли.');
         }
-        return route.action(authenticated, id, data);
+        return route.action(authenticated, id, data, relatedId);
       });
       return json(response, 200, { ok: true, ...result });
     }
