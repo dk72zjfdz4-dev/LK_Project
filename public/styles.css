@@ -342,7 +342,10 @@ a { color: var(--primary); }
 #view-home #home-stats .stat,
 #view-home .home-calendar { background: var(--glass-dense); }
 #home-schedule { align-items: start; }
-#home-schedule:not(:has(#home-upcoming:not([hidden]), #home-changes:not([hidden]), #home-stats:not([hidden]))) { display: none; }
+#home-schedule:not(:has(.home-column > :not([hidden], .home-schedule-column), .home-schedule-column > :not([hidden]))) { display: none; }
+.home-column { display: grid; gap: inherit; min-width: 0; }
+.home-column:not(:has(> :not([hidden], .home-schedule-column), .home-schedule-column > :not([hidden]))),
+.home-schedule-column:not(:has(> :not([hidden]))) { display: none; }
 .home-schedule-column { display: grid; gap: 11px; min-width: 0; }
 .home-upcoming { padding-block: clamp(14px, 1.9vw, 23px); }
 #view-home .home-changes .panel-heading h2 { font-size: 1.08rem; }
@@ -659,13 +662,26 @@ a { color: var(--primary); }
   .calendar-card .change-label { display: inline-block; padding: 4px 7px; }
 }
 
-@media (width > 850px) {
-  #home-schedule:has(#home-stats:not([hidden])):has(.change-row:nth-child(2)):has(#home-changes-toggle[aria-expanded="false"]) {
-    align-items: stretch;
+@media (width > 880px) {
+  #home-schedule { grid-template-rows: auto 1fr; }
+  #home-schedule .home-column { grid-row: span 2; }
+  #home-schedule .home-calendar { align-self: start; }
+  #home-schedule .home-column:first-child,
+  .home-column-secondary:not(:has(#home-changes-toggle[aria-expanded="true"])) {
+    align-self: stretch;
+    grid-template-rows: subgrid;
   }
   .home-changes:has(.change-row:nth-child(2)):has(#home-changes-toggle[aria-expanded="false"]) {
     padding-block-end: clamp(12px, calc(2.1vw - 4px), 21px);
   }
+}
+
+@media (width <= 880px) {
+  #home-schedule { reading-flow: grid-rows; }
+  #home-schedule .home-column { display: contents; }
+  #home-changes { order: 1; }
+  #home-schedule .home-calendar { order: 2; }
+  #home-cabinet { order: 3; }
 }
 
 @media (max-width: 850px) {

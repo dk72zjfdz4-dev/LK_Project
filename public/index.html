@@ -203,40 +203,42 @@
             <button type="button" class="button button-secondary" data-schedule-retry hidden>Повторить</button>
           </div>
           <div class="home-grid" id="home-schedule">
-            <div class="home-schedule-column">
-              <section class="panel home-upcoming" id="home-upcoming" data-student-schedule hidden>
-                <div class="panel-heading">
-                  <h2>Ближайшие занятия</h2>
-                  <a class="inline-link" href="#schedule">Всё расписание <span aria-hidden="true">→</span></a>
-                </div>
-                <div id="upcoming-lessons"></div>
-              </section>
-              <div class="home-stats" id="home-stats" hidden></div>
-            </div>
-            <section class="panel home-changes" id="home-changes" data-student-schedule hidden>
-              <div class="panel-heading">
-                <h2>Предстоящие изменения</h2>
-                <button type="button" class="inline-link" id="home-changes-toggle" aria-expanded="false" aria-controls="changed-lessons">
-                  <span>Показать все</span><span>Свернуть</span>
-                </button>
+            <div class="home-column">
+              <div class="home-schedule-column">
+                <section class="panel home-upcoming" id="home-upcoming" data-student-schedule hidden>
+                  <div class="panel-heading">
+                    <h2>Ближайшие занятия</h2>
+                    <a class="inline-link" href="#schedule">Всё расписание <span aria-hidden="true">→</span></a>
+                  </div>
+                  <div id="upcoming-lessons"></div>
+                </section>
+                <div class="home-stats" id="home-stats" hidden></div>
               </div>
-              <div id="changed-lessons"></div>
-            </section>
+              <section class="panel home-calendar" data-student-schedule hidden>
+                <div class="panel-heading">
+                  <h2>Учебная неделя</h2>
+                  <span class="muted" id="home-week-label"></span>
+                </div>
+                <fieldset class="mini-week" id="home-week">
+                  <legend class="visually-hidden">День учебной недели</legend>
+                </fieldset>
+                <div class="home-day" id="home-day" aria-live="polite"></div>
+              </section>
+            </div>
+            <div class="home-column home-column-secondary">
+              <section class="panel home-changes" id="home-changes" data-student-schedule hidden>
+                <div class="panel-heading">
+                  <h2>Предстоящие изменения</h2>
+                  <button type="button" class="inline-link" id="home-changes-toggle" aria-expanded="false" aria-controls="changed-lessons">
+                    <span>Показать все</span><span>Свернуть</span>
+                  </button>
+                </div>
+                <div id="changed-lessons"></div>
+              </section>
+              <div id="home-cabinet" class="home-module" hidden></div>
+            </div>
           </div>
           <div class="home-stats" id="home-staff-stats" hidden></div>
-          <div class="home-grid">
-            <section class="panel home-calendar" data-student-schedule hidden>
-              <div class="panel-heading">
-                <h2>Учебная неделя</h2>
-                <span class="muted" id="home-week-label"></span>
-              </div>
-              <fieldset class="mini-week" id="home-week">
-                <legend class="visually-hidden">День учебной недели</legend>
-              </fieldset>
-              <div class="home-day" id="home-day" aria-live="polite"></div>
-            </section>
-            <div id="home-cabinet" class="home-module" hidden></div>
-          </div>
           <div id="home-staff" class="home-grid" hidden></div>
         </section>
 

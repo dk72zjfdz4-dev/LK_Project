@@ -80,13 +80,21 @@ test('home shows two upcoming changes until expanded', async ({ page, cabinet })
   await expect.poll(bottomGap).toBeCloseTo(0, 0);
   await expect(rows.first()).toContainText('Занятие 24');
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  const week = page.locator('.home-calendar');
+  const top = (locator) => locator.evaluate((element) => element.getBoundingClientRect().top);
+  const weekBox = await week.boundingBox();
+  const deadlines = page.locator('#home-cabinet');
+  const deadlinesTop = await top(deadlines);
   await toggle.press('Enter');
   await expect(rows).toHaveCount(3);
   await expect(rows.last()).toContainText('Занятие 26');
+  expect(await week.boundingBox()).toEqual(weekBox);
+  expect(await top(deadlines)).toBeGreaterThan(deadlinesTop);
   const collapse = panel.getByRole('button', { name: 'Свернуть' });
   await expect(collapse).toHaveAttribute('aria-expanded', 'true');
   await collapse.click();
   await expect(rows).toHaveCount(2);
+  expect(await week.boundingBox()).toEqual(weekBox);
 
   nextWeekLessons = changes.slice(0, 2);
   await page.reload();
@@ -95,6 +103,8 @@ test('home shows two upcoming changes until expanded', async ({ page, cabinet })
   await expect.poll(bottomGap).toBeCloseTo(0, 0);
   await page.setViewportSize({ width: 390, height: 844 });
   expect((await panel.boundingBox()).y).toBeGreaterThan(await bottom(requests));
+  expect(await top(week)).toBeGreaterThan(await bottom(panel));
+  expect(await top(deadlines)).toBeGreaterThan(await bottom(week));
 });
 
 async function fits(page) {
