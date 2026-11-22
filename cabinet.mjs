@@ -415,6 +415,39 @@ export function seedCabinet(db) {
     ) STRICT;
     PRAGMA user_version = 12;
   `);
+  if (version < 13) {
+    const profiles = [
+      ['student1', 'Гриффиндор', 'Защита от тёмных искусств', 2, 'ГР-24-02'],
+      ['student2', 'Слизерин', 'Зельеварение и алхимия', 3, 'СЛ-23-04'],
+      ['directory:yozhik', 'Когтевран', 'Древние руны', 2, 'КО-24-01'],
+      ['directory:barash', 'Когтевран', 'История магии', 2, 'КО-24-01'],
+      ['directory:losyash', 'Когтевран', 'Магическая астрономия', 3, 'КО-23-01'],
+      ['directory:kopatych', 'Пуффендуй', 'Травология', 3, 'ПУ-23-01'],
+      ['directory:pin', 'Когтевран', 'Зачарование артефактов', 3, 'КО-23-01'],
+      ['directory:kar-karych', 'Гриффиндор', 'Магические искусства', 3, 'ГР-23-01'],
+      ['directory:sovunya', 'Пуффендуй', 'Целительская магия', 3, 'ПУ-23-01'],
+    ];
+    const student = db.prepare("SELECT id, student_group FROM students WHERE login = ? AND role = 'student'");
+    const update = db.prepare('UPDATE students SET faculty = ?, program = ?, year = ?, student_group = ? WHERE id = ?');
+    const moveScope = db.prepare(`
+      INSERT OR IGNORE INTO portfolio_dean_groups (dean_id, student_group)
+      SELECT dean_id, ? FROM portfolio_dean_groups WHERE student_group = ?
+    `);
+    const removeUnusedScope = db.prepare(`
+      DELETE FROM portfolio_dean_groups WHERE student_group = ?
+        AND NOT EXISTS (SELECT 1 FROM students WHERE role = 'student' AND student_group = ?)
+    `);
+    for (const [login, faculty, program, year, group] of profiles) {
+      const record = student.get(login);
+      if (!record) continue;
+      update.run(faculty, program, year, group, record.id);
+      if (record.student_group && record.student_group !== group) {
+        moveScope.run(group, record.student_group);
+        removeUnusedScope.run(record.student_group, record.student_group);
+      }
+    }
+    db.exec('PRAGMA user_version = 13');
+  }
 }
 
 function isPdf(contents) {
@@ -582,7 +615,8 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
       CASE WHEN partner.role = 'teacher' THEN partner.login END AS teacherLogin,
       partner.full_name AS fullName,
       CASE partner.role WHEN 'dean' THEN 'Деканат' WHEN 'teacher' THEN 'Преподаватель'
-        ELSE COALESCE(NULLIF(TRIM(partner.student_group), ''), 'Студент') END AS roleLabel,
+        ELSE 'Студент' END AS roleLabel,
+      partner.faculty, partner.program, partner.student_group AS studentGroup, partner.year,
       last.text AS lastText, last.sender_id = :viewerId AS lastMine, last.created_at AS lastAt,
       (SELECT COUNT(*) FROM messages m WHERE m.dialogue_id = d.id AND m.sender_id <> :viewerId
         AND m.is_read = 0 AND ${messageVisibility}) AS unreadCount
@@ -607,7 +641,7 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
       CASE WHEN partner.role = 'dean' THEN 'Деканат' ELSE partner.full_name END AS title,
       partner.full_name AS fullName,
       CASE partner.role WHEN 'dean' THEN 'Деканат' WHEN 'teacher' THEN 'Преподаватель'
-        ELSE COALESCE(NULLIF(TRIM(partner.student_group), ''), 'Студент') END AS roleLabel
+        ELSE 'Студент' END AS roleLabel
     FROM students partner WHERE partner.id <> ?
     ORDER BY partner.full_name, partner.id
   `);
@@ -803,9 +837,10 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
   function cabinet(viewer) {
     const { id, role } = viewer;
     const conversations = dialogues.all({ viewerId: id })
-      .map(({ teacherLogin, lastMine, ...dialogue }) => ({
+      .map(({ teacherLogin, lastMine, faculty, program, studentGroup, year, ...dialogue }) => ({
         ...dialogue, lastMine: lastMine === null ? null : Boolean(lastMine),
         contact: dialogueContact(dialogue, role, teacherLogin),
+        ...(dialogue.partnerRole === 'student' && { studentProfile: { faculty, program, group: studentGroup, year } }),
       }));
     return {
       grades: role === 'dean' ? [] : grades.all(id, role, id, role),

@@ -330,6 +330,9 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
     UPDATE students SET full_name = 'Даниил Андреевич Речин' WHERE login = 'student2';
     DELETE FROM students WHERE directory_only = 1;
     UPDATE assignments SET due_at = '2026-11-21T20:00:00.000Z' WHERE title = 'Отчёт по практикуму';
+    UPDATE students SET student_group = 'МО-24-02' WHERE login = 'student1';
+    UPDATE students SET student_group = 'МЭ-23-04' WHERE login = 'student2';
+    UPDATE portfolio_dean_groups SET student_group = 'МО-24-02' WHERE student_group = 'ГР-24-02';
     DROP TABLE hidden_messages;
     ALTER TABLE messages DROP COLUMN deleted_for_all;
     PRAGMA user_version = 7;
@@ -384,14 +387,25 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   assert.deepEqual(Buffer.from(await document.arrayBuffer()), docx);
   const studentDirectory = persisted.dialogueContacts.filter(({ partnerRole }) => partnerRole === 'student');
   assert.equal(studentDirectory.length, 8);
+  assert.ok(studentDirectory.every(({ roleLabel, studentProfile }) => roleLabel === 'Студент' && studentProfile === undefined));
+  const migrated = new DatabaseSync(env.DB_PATH, { readOnly: true });
+  assert.equal(migrated.prepare('PRAGMA user_version').get().user_version, 13);
+  assert.deepEqual(migrated.prepare('SELECT student_group FROM portfolio_dean_groups').all().map(({ student_group }) => student_group), ['ГР-24-02']);
+  migrated.close();
   const peer = studentDirectory.find(({ title }) => title === 'Крош Андреевич Речин');
   assert.ok(peer);
-  assert.equal((await expect('/me', other)).profile.fullName, peer.title);
+  const otherProfile = (await expect('/me', other)).profile;
+  assert.equal(otherProfile.fullName, peer.title);
+  assert.equal(otherProfile.faculty, 'Слизерин');
+  assert.equal((await expect('/me', student)).profile.faculty, 'Гриффиндор');
   const hedgehog = studentDirectory.find(({ title }) => title === 'Ёжик Павлович Иголкин');
   assert.ok(hedgehog);
   await expect('/login', null, { login: 'directory:yozhik', password: passwords.student1 }, 401);
   const { dialogueId: directoryThread } = await expect('/dialogues/contact/' + hedgehog.partnerId, student, {});
   await expect('/dialogues/' + directoryThread + '/messages', student, { text: 'Привет, Ёжик!' });
+  assert.deepEqual((await cabinet(student)).dialogues.find(({ id }) => id === directoryThread).studentProfile, {
+    faculty: 'Когтевран', program: 'Древние руны', group: 'КО-24-01', year: 2,
+  });
   await expect('/dialogues/' + directoryThread, other, undefined, 404);
   const mcgonagall = persisted.dialogueContacts.find(({ title }) => title === 'Минерва Макгонагалл');
   assert.ok(mcgonagall);
@@ -401,7 +415,12 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   assert.equal((await expect('/dialogues/contact/' + reverse.partnerId, other, {})).dialogueId, peerThread);
   for (const cookie of [student, other]) {
     const { dialogues, dialogueContacts } = await cabinet(cookie);
-    assert.equal(dialogues.find(({ id }) => id === peerThread).contact, null);
+    const peerDialogue = dialogues.find(({ id }) => id === peerThread);
+    assert.equal(peerDialogue.contact, null);
+    assert.equal(peerDialogue.roleLabel, 'Студент');
+    assert.deepEqual(peerDialogue.studentProfile, cookie === student
+      ? { faculty: 'Слизерин', program: 'Зельеварение и алхимия', group: 'СЛ-23-04', year: 3 }
+      : { faculty: 'Гриффиндор', program: 'Защита от тёмных искусств', group: 'ГР-24-02', year: 2 });
     assert.ok(dialogueContacts.every((entry) => !('email' in entry)));
   }
   assert.ok(!(await cabinet(dean)).dialogues.some(({ id }) => id === peerThread));

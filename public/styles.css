@@ -1475,6 +1475,14 @@ details[open] > .record-summary::before { transform: rotate(45deg); }
 }
 .emoji-button:hover { background: var(--peach); }
 .contact-card { display: grid; gap: 5px; padding-block: 10px; }
+.student-contact-profile {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 3px 0;
+}
+.student-contact-profile dt { color: var(--muted); }
+.student-contact-profile dd { margin: 0; overflow-wrap: anywhere; }
 .contact-address { color: var(--ink); user-select: text; }
 
 @media (max-width: 680px) {

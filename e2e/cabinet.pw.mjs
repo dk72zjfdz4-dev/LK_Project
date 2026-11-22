@@ -473,6 +473,28 @@ test('student finds contacts by category and opens a teacher conversation', asyn
   await expect(page.locator('#message-text')).toBeVisible();
 });
 
+for (const width of [360, 1440]) {
+  test(`student contacts show school details at ${width} px`, async ({ page, cabinet }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await login(page, cabinet);
+    await page.locator('#header-inbox').click();
+    await page.getByRole('button', { name: 'Новый диалог' }).click();
+    await page.getByLabel('Категория контактов').selectOption('student');
+    await page.locator('#dialogue-search').fill('Речин');
+    const entry = page.locator('#dialogues-content button').filter({ hasText: 'Крош Речин' });
+    await expect(entry.locator('.dialogue-role')).toHaveText('Студент');
+    await entry.click();
+    await expect(page.locator('#dialogue-role')).toHaveText('Студент');
+    await page.locator('#dialogue-info summary').press('Enter');
+    const card = page.locator('#dialogue-contact');
+    await expect(card.getByRole('heading')).toHaveText('Крош Андреевич Речин');
+    await expect(card.locator('dt')).toHaveText(['Факультет', 'Направление', 'Группа', 'Курс']);
+    await expect(card.locator('dd')).toHaveText(['Слизерин', 'Зельеварение и алхимия', 'СЛ-23-04', '3']);
+    await expect(card.getByRole('link', { name: 'Открыть почту' })).toHaveCount(0);
+    await fits(page);
+  });
+}
+
 test('teacher can search all categories and start a conversation with the dean’s office', async ({ page, cabinet }) => {
   await login(page, cabinet, 'teacher');
   await page.locator('#header-inbox').click();

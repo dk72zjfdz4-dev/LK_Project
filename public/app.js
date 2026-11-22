@@ -1172,11 +1172,21 @@ function statusBadge(text, status) {
   return element('span', 'status-badge status-' + status, text);
 }
 
-function contactCard(contact, { withId = false, canMessage = false } = {}) {
+function contactCard(contact, { withId = false, canMessage = false, studentProfile } = {}) {
   const card = element('article', 'contact-card');
   if (withId) card.id = 'contact-' + contact.id;
   const name = element('h3', 'lesson-title', contact.name);
   name.tabIndex = -1;
+  card.append(name);
+  if (studentProfile) {
+    const { faculty, program, group, year } = studentProfile;
+    const details = element('dl', 'student-contact-profile');
+    for (const [label, value] of [['Факультет', faculty], ['Направление', program], ['Группа', group], ['Курс', year]]) {
+      if (value) details.append(element('dt', '', label), element('dd', '', String(value)));
+    }
+    if (details.childElementCount) card.append(details);
+  }
+  if (!contact.email) return card;
   const address = element('p', 'contact-address', contact.email);
   const actions = element('div', 'contact-actions');
   const copy = element('button', 'button button-secondary', 'Скопировать почту');
@@ -1203,7 +1213,7 @@ function contactCard(contact, { withId = false, canMessage = false } = {}) {
     actions.append(write);
   }
   actions.append(copy, mail);
-  card.append(name, element('p', 'muted', 'Демо-адрес'), address, actions, status, errorOutput);
+  card.append(element('p', 'muted', 'Демо-адрес'), address, actions, status, errorOutput);
   if (studentMessaging && !contact.teacherId) {
     card.append(element('p', 'muted', 'Для этого преподавателя переписка в кабинете недоступна. Можно открыть почту.'));
   }
@@ -1244,12 +1254,15 @@ function renderContacts(contacts) {
 }
 
 function renderDialogueContact(item) {
-  const signature = JSON.stringify([item?.fullName, item?.contact]);
+  const signature = JSON.stringify([item?.fullName, item?.contact, item?.studentProfile]);
   if (renders.get('dialogue-contact') === signature) return;
   const content = byId('dialogue-contact');
   content.replaceChildren();
-  if (item?.contact) content.append(contactCard(item.contact));
-  else if (item) content.append(element('p', 'record-copy', item.fullName ?? item.title));
+  if (item?.contact || item?.studentProfile) {
+    content.append(contactCard(item.contact ?? { name: item.fullName }, { studentProfile: item.studentProfile }));
+  } else if (item) {
+    content.append(element('p', 'record-copy', item.fullName ?? item.title));
+  }
   renders.set('dialogue-contact', signature);
 }
 
