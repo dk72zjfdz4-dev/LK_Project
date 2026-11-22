@@ -174,6 +174,10 @@ export function installCabinet(db) {
       change TEXT NOT NULL,
       PRIMARY KEY (lesson_id, date)
     ) STRICT;
+    CREATE TABLE IF NOT EXISTS lesson_week_parity (
+      lesson_id INTEGER PRIMARY KEY REFERENCES lessons(id) ON DELETE CASCADE,
+      parity INTEGER NOT NULL CHECK (parity IN (0, 1))
+    ) STRICT;
   `);
   if (!db.prepare("SELECT 1 FROM pragma_table_info('students') WHERE name = 'directory_only'").get()) {
     db.exec('ALTER TABLE students ADD COLUMN directory_only INTEGER NOT NULL DEFAULT 0 CHECK (directory_only IN (0, 1))');
@@ -447,6 +451,43 @@ export function seedCabinet(db) {
       }
     }
     db.exec('PRAGMA user_version = 13');
+  }
+  if (version < 14) {
+    const evenSchedule = [
+      ['student1', [
+        [1, '10:40', '12:00', 3, 'В-304'],
+        [5, '10:40', '12:00', 2, 'Б-312'],
+        [6, '09:00', '10:20', 1, 'А-205'],
+        [6, '10:40', '12:00', 4, 'Б-226'],
+      ]],
+      ['student2', [
+        [2, '10:40', '12:00', 0, 'А-204'],
+        [5, '12:30', '13:50', 5, 'А-418'],
+        [6, '09:00', '10:20', 3, 'В-304'],
+        [6, '10:40', '12:00', 2, 'Б-312'],
+      ]],
+    ];
+    const student = db.prepare("SELECT id FROM students WHERE login = ? AND role = 'student'");
+    const markOdd = db.prepare(`
+      INSERT INTO lesson_week_parity (lesson_id, parity)
+      SELECT id, 1 FROM lessons WHERE student_id = ? AND weekday = ? AND start_time = ?
+    `);
+    const insert = db.prepare(`
+      INSERT INTO lessons (student_id, weekday, start_time, end_time, title, room, teacher, change)
+      VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+    `);
+    const markEven = db.prepare('INSERT INTO lesson_week_parity (lesson_id, parity) VALUES (?, 0)');
+    for (const [login, entries] of evenSchedule) {
+      const account = student.get(login);
+      if (!account) continue;
+      for (const [weekday, start, end, subject, room] of entries) {
+        const [title, teacher] = subjects[subject];
+        markOdd.run(account.id, weekday, start);
+        const { lastInsertRowid } = insert.run(account.id, weekday, start, end, title, room, teacher);
+        markEven.run(lastInsertRowid);
+      }
+    }
+    db.exec('PRAGMA user_version = 14');
   }
 }
 

@@ -324,6 +324,9 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   await stop();
   const legacyDb = new DatabaseSync(env.DB_PATH);
   legacyDb.exec(`
+    PRAGMA foreign_keys = ON;
+    DELETE FROM lessons WHERE id IN (SELECT lesson_id FROM lesson_week_parity WHERE parity = 0);
+    DELETE FROM lesson_week_parity;
     UPDATE students SET login = 'dean1' WHERE login = 'dekanat1';
     UPDATE lessons SET teacher = 'Прежний преподаватель';
     UPDATE students SET full_name = 'Мария Ланская' WHERE login = 'teacher1';
@@ -389,7 +392,7 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   assert.equal(studentDirectory.length, 8);
   assert.ok(studentDirectory.every(({ roleLabel, studentProfile }) => roleLabel === 'Студент' && studentProfile === undefined));
   const migrated = new DatabaseSync(env.DB_PATH, { readOnly: true });
-  assert.equal(migrated.prepare('PRAGMA user_version').get().user_version, 13);
+  assert.equal(migrated.prepare('PRAGMA user_version').get().user_version, 14);
   assert.deepEqual(migrated.prepare('SELECT student_group FROM portfolio_dean_groups').all().map(({ student_group }) => student_group), ['ГР-24-02']);
   migrated.close();
   const peer = studentDirectory.find(({ title }) => title === 'Крош Андреевич Речин');

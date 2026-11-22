@@ -99,6 +99,7 @@ test('student accounts, schedule ownership and session revocation', { timeout: 2
     assert.ok(lessons.length);
     assert.ok(nextWeekLessons[0].date > lessons.at(-1).date);
     let monthLesson;
+    let novemberLessons;
     for (const month of ['2026-11', '2026-12']) {
       const monthly = await request('/api/schedule?month=' + month, { cookie });
       assert.equal(monthly.status, 200);
@@ -108,6 +109,7 @@ test('student accounts, schedule ownership and session revocation', { timeout: 2
       assert.ok(payload.lessons.every(({ date }) => date.startsWith(month + '-')));
       assert.equal(new Set(payload.lessons.map(({ id }) => id)).size, payload.lessons.length);
       if (month === '2026-12') monthLesson = payload.lessons.at(-1).id;
+      else novemberLessons = payload.lessons;
     }
     assert.equal((await request('/api/schedule?month=2026-13', { cookie })).status, 400);
     const week = await request('/api/schedule?week=2026-11-23', { cookie });
@@ -117,6 +119,18 @@ test('student accounts, schedule ownership and session revocation', { timeout: 2
     assert.equal(selected.selectedWeek.weekStart, '2026-11-23');
     assert.ok(selected.selectedWeek.lessons.every(({ date }) => date >= '2026-11-23' && date <= '2026-11-29'));
     assert.equal(selected.selectedWeek.lessons.some(({ cancelled }) => cancelled), users.length === 0);
+    const odd = (await (await request('/api/schedule?week=2026-11-16', { cookie })).json()).selectedWeek.lessons;
+    const even = selected.selectedWeek.lessons;
+    const saturday = even.filter(({ date }) => date === '2026-11-28');
+    assert.deepEqual(saturday.map(({ start }) => start), ['09:00', '10:40']);
+    assert.deepEqual(saturday.map(({ id }) => id), novemberLessons.filter(({ date }) => date === '2026-11-28').map(({ id }) => id));
+    assert.equal(odd.some(({ date }) => date === '2026-11-21'), false);
+    assert.notDeepEqual(odd.map(({ title }) => title), even.filter(({ date }) => date < '2026-11-28').map(({ title }) => title));
+    const saturdayId = saturday[0].id;
+    assert.equal((await request('/api/lessons/' + saturdayId, { cookie })).status, 200);
+    assert.equal((await request('/api/lessons/' + saturdayId.replace(/2026-11-28$/, '2026-11-21'), { cookie })).status, 404);
+    const newYear = (await (await request('/api/schedule?week=2021-01-04', { cookie })).json()).selectedWeek.lessons;
+    assert.equal(newYear.some(({ date }) => date === '2021-01-09'), false);
     const weekLesson = selected.selectedWeek.lessons[0].id;
     for (const query of ['week=2026-12-01', 'week=2026-02-30', 'week=2026-11-23&month=2026-11']) {
       assert.equal((await request('/api/schedule?' + query, { cookie })).status, 400);

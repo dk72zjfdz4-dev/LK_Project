@@ -181,14 +181,17 @@ const profileBySession = db.prepare(`
   WHERE token_hash = ? AND expires_at > ? AND students.directory_only = 0
 `);
 const allLessons = db.prepare(`
-  SELECT * FROM lessons WHERE student_id = ? ORDER BY weekday, start_time, id
+  SELECT l.*, p.parity AS week_parity FROM lessons l
+  LEFT JOIN lesson_week_parity p ON p.lesson_id = l.id
+  WHERE l.student_id = ? ORDER BY l.weekday, l.start_time, l.id
 `);
 const cancelledLessons = db.prepare(`
   SELECT c.lesson_id, c.date, c.change FROM lesson_cancellations c JOIN lessons l ON l.id = c.lesson_id
   WHERE l.student_id = ? AND c.date BETWEEN ? AND ?
 `);
 const ownedLesson = db.prepare(`
-  SELECT l.*, c.change AS cancellation FROM lessons l
+  SELECT l.*, c.change AS cancellation, p.parity AS week_parity FROM lessons l
+  LEFT JOIN lesson_week_parity p ON p.lesson_id = l.id
   LEFT JOIN lesson_cancellations c ON c.lesson_id = l.id AND c.date = ?
   WHERE l.student_id = ? AND l.id = ? AND l.weekday = ?
 `);
@@ -292,10 +295,25 @@ function lessonOn(row, date, cancellation) {
   };
 }
 
+function weekParity(date) {
+  const thursday = new Date(date);
+  thursday.setUTCDate(thursday.getUTCDate() + 4 - (thursday.getUTCDay() || 7));
+  const yearStart = new Date(thursday);
+  yearStart.setUTCMonth(0, 1);
+  return (Math.floor((thursday - yearStart) / 604800000) + 1) % 2;
+}
+
+function matchesWeek(row, parity) {
+  return row.week_parity === null || row.week_parity === parity;
+}
+
 function weekLessons(rows, monday, offset, cancellations) {
-  return rows.map((row) => {
-    const date = new Date(monday);
-    date.setUTCDate(date.getUTCDate() + offset + row.weekday - 1);
+  const start = new Date(monday);
+  start.setUTCDate(start.getUTCDate() + offset);
+  const parity = weekParity(start);
+  return rows.filter((row) => matchesWeek(row, parity)).map((row) => {
+    const date = new Date(start);
+    date.setUTCDate(date.getUTCDate() + row.weekday - 1);
     const day = civilDate(date);
     return lessonOn(row, day, cancellations.get(`${row.id}-${day}`));
   });
@@ -350,7 +368,9 @@ function monthSchedule(studentId, month) {
   const lessons = [];
   for (const day = new Date(first); day < after; day.setUTCDate(day.getUTCDate() + 1)) {
     const date = civilDate(day);
-    for (const row of rows.filter(({ weekday }) => weekday === (day.getUTCDay() || 7))) {
+    const weekday = day.getUTCDay() || 7;
+    const parity = weekParity(day);
+    for (const row of rows.filter((row) => row.weekday === weekday && matchesWeek(row, parity))) {
       lessons.push(lessonOn(row, date, cancellations.get(`${row.id}-${date}`)));
     }
   }
@@ -364,7 +384,7 @@ function lessonById(studentId, id) {
   const parsedDate = new Date(`${date}T00:00:00Z`);
   if (!Number.isFinite(parsedDate.getTime()) || civilDate(parsedDate) !== date) return null;
   const row = ownedLesson.get(date, studentId, Number(rowId), parsedDate.getUTCDay() || 7);
-  return row ? lessonOn(row, date, row.cancellation) : null;
+  return row && matchesWeek(row, weekParity(parsedDate)) ? lessonOn(row, date, row.cancellation) : null;
 }
 
 function sessionHash(request) {
