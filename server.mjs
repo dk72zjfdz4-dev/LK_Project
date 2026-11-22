@@ -7,6 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { createCabinet, installCabinet, seedCabinet } from './cabinet.mjs';
+import { createLoginAdmission } from './login-admission.mjs';
 import { createTeacherWorkflows, installTeacherWorkflows } from './teacher.mjs';
 
 const root = realpathSync(fileURLToPath(new URL('.', import.meta.url)));
@@ -20,6 +21,7 @@ const sessionCookie = 'student_session';
 const sessionSeconds = 12 * 60 * 60;
 const passwordOptions = { N: 32768, r: 8, p: 3, maxmem: 64 * 1024 * 1024 };
 const hashPassword = promisify(scrypt);
+const admitPasswordCheck = createLoginAdmission({ concurrency: 2, queueLimit: 8 });
 const dummySalt = randomBytes(16);
 const dummyHash = randomBytes(64);
 const moscowDate = new Intl.DateTimeFormat('en-CA', {
@@ -472,10 +474,20 @@ async function login(request, response) {
     throw new HttpError(400, 'Укажите логин и пароль.');
   }
 
-  const student = studentByLogin.get(body.login.trim());
-  const suppliedHash = await hashPassword(body.password, student?.password_salt ?? dummySalt, 64, passwordOptions);
-  const correct = timingSafeEqual(suppliedHash, student?.password_hash ?? dummyHash);
-  if (!student || !correct) throw new HttpError(401, 'Неверный логин или пароль.');
+  const verification = admitPasswordCheck(async () => {
+    if (response.destroyed) return null;
+    const student = studentByLogin.get(body.login.trim());
+    const suppliedHash = await hashPassword(body.password, student?.password_salt ?? dummySalt, 64, passwordOptions);
+    const correct = timingSafeEqual(suppliedHash, student?.password_hash ?? dummyHash);
+    return student && correct ? student : null;
+  });
+  if (verification === null) {
+    response.setHeader('Retry-After', '1');
+    throw new HttpError(429, 'Слишком много одновременных попыток входа. Повторите через несколько секунд.');
+  }
+  const student = await verification;
+  if (response.destroyed) return;
+  if (!student) throw new HttpError(401, 'Неверный логин или пароль.');
 
   const token = randomBytes(32).toString('base64url');
   const now = Date.now();
