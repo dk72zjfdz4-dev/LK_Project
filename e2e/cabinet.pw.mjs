@@ -163,12 +163,12 @@ for (const width of [360, 741, 1440]) {
     await page.clock.setFixedTime(new Date('2026-11-21T16:00:00Z'));
     await page.goto(cabinet.origin);
     const scene = page.locator('.login-scene img');
-    await expect(scene).toHaveAttribute('src', '/assets/auth/winter-evening.png');
+    await expect(scene).toHaveAttribute('src', '/assets/auth/winter-evening.webp');
     await expect(page.locator('.login-layout')).toHaveCSS('display', 'grid');
     await fits(page);
     await page.screenshot({ path: `test-results/screenshots/seasonal-login-${width}.png`, animations: 'disabled' });
     await page.locator('#login-theme input[value="light"]').check();
-    await expect(scene).toHaveAttribute('src', '/assets/auth/winter-day.png');
+    await expect(scene).toHaveAttribute('src', '/assets/auth/winter-day.webp');
     const headline = page.locator('.login-header .login-headline');
     await expect(headline).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     const slogan = headline.locator('.login-headline-text');
@@ -182,7 +182,7 @@ for (const width of [360, 741, 1440]) {
     await fits(page);
     await page.screenshot({ path: `test-results/screenshots/seasonal-login-light-${width}.png`, animations: 'disabled' });
     await page.reload();
-    await expect(scene).toHaveAttribute('src', '/assets/auth/winter-day.png');
+    await expect(scene).toHaveAttribute('src', '/assets/auth/winter-day.webp');
     await page.getByRole('button', { name: 'Показать пароль' }).click();
     await expect(page.locator('#password')).toHaveAttribute('type', 'text');
     await page.getByRole('button', { name: 'Скрыть пароль' }).click();

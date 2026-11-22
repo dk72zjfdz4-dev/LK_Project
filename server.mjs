@@ -532,8 +532,8 @@ async function api(request, response, path) {
 }
 
 async function staticResponse(request, response, path) {
-  const loginScene = /^\/assets\/auth\/(winter|spring|summer|autumn)-(day|evening)\.png$/.test(path);
-  const file = loginScene ? [path.slice(1), 'image/png'] : staticFiles.get(path);
+  const loginScene = /^\/assets\/auth\/(?:winter|spring|summer|autumn)-(?:day|evening)\.(webp|png)$/.exec(path);
+  const file = loginScene ? [path.slice(1), `image/${loginScene[1]}`] : staticFiles.get(path);
   if (!file || !['GET', 'HEAD'].includes(request.method)) return staticError(response, 404);
   const [filename, mediaType] = file;
   const location = await realpath(resolve(publicDirectory, filename));

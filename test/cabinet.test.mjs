@@ -66,9 +66,9 @@ test('student accounts, schedule ownership and session revocation', { timeout: 2
   assert.match(loginStyles.headers.get('content-type'), /^text\/css\b/);
   for (const season of ['winter', 'spring', 'summer', 'autumn']) {
     for (const tone of ['day', 'evening']) {
-      const asset = await request(`/assets/auth/${season}-${tone}.png`, { method: 'HEAD' });
+      const asset = await request(`/assets/auth/${season}-${tone}.webp`, { method: 'HEAD' });
       assert.equal(asset.status, 200);
-      assert.equal(asset.headers.get('content-type'), 'image/png');
+      assert.equal(asset.headers.get('content-type'), 'image/webp');
       assert.equal(asset.headers.get('x-content-type-options'), 'nosniff');
     }
   }

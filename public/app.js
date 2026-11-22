@@ -3146,14 +3146,25 @@ let loginThemeTimer;
 let requestedLoginScene;
 
 async function loadLoginScene(src) {
+  const fallback = src.replace(/\.webp$/, '.png');
+  const current = loginScene.firstElementChild?.getAttribute('src');
   if (requestedLoginScene === src) return;
+  if (current === src || current === fallback) {
+    requestedLoginScene = undefined;
+    return;
+  }
   requestedLoginScene = src;
-  if (loginScene.firstElementChild?.getAttribute('src') === src) return;
   const image = new Image();
   image.alt = '';
-  image.src = src;
   try {
-    await image.decode();
+    image.src = src;
+    try {
+      await image.decode();
+    } catch {
+      if (requestedLoginScene !== src || loginScreen.hidden) return;
+      image.src = fallback;
+      await image.decode();
+    }
     if (requestedLoginScene === src && !loginScreen.hidden) loginScene.replaceChildren(image);
   } catch {
     if (requestedLoginScene === src) loginScene.replaceChildren();
@@ -3174,7 +3185,7 @@ function syncLoginTheme() {
   const night = mode === 'dark' || (mode === 'auto' && !daytime);
   loginScreen.dataset.season = season;
   loginScreen.dataset.tone = night ? 'night' : 'day';
-  const src = '/assets/auth/' + season + '-' + (night ? 'evening' : 'day') + '.png';
+  const src = '/assets/auth/' + season + '-' + (night ? 'evening' : 'day') + '.webp';
   void loadLoginScene(src);
   const nextHour = mode === 'auto' && hour < 18 ? (daytime ? 18 : 7) : 24;
   const delay = (((nextHour - hour) * 60 - minute) * 60 - second) * 1000 - now.getMilliseconds();
