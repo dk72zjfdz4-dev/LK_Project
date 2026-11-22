@@ -108,7 +108,7 @@ POST в таблице данных кабинета и POST для избран
 
 ## Расписание, журнал и контакты преподавателя
 
-- `GET /api/teacher/schedule?week=YYYY-MM-DD` возвращает `{today,weekStart,lessons}`. Занятие содержит `id,date,start,end,title,group,room,status,originalDate,originalStart,originalEnd,comment`. Статусы: `scheduled`, `moved`, `cancelled`. Идентификатор вида `<lessonId>-<originalDate>` сохраняется при переносе.
+- `GET /api/teacher/schedule?week=YYYY-MM-DD` возвращает `{today,weekStart,lessons}`. Занятие содержит `id,date,start,end,title,group,faculty,room,status,originalDate,originalStart,originalEnd,comment`. Статусы: `scheduled`, `moved`, `cancelled`. Идентификатор вида `<lessonId>-<originalDate>` сохраняется при переносе. В списке журнала `faculty` используется вместе с `date` для фильтрации.
 - `POST /api/teacher/lessons/:id/change` принимает `{action:"move",date,start,end,room,comment}` или `{action:"cancel",comment}` и возвращает `{lesson}`. Сервер проверяет назначение и конфликты. В расписании студента сохраняются те же поля изменения и совместимые `change` и `cancelled`.
 - `GET /api/teacher/journal` возвращает `{lessons,recent}` с количеством черновиков по занятиям и историей публикаций. `GET /api/teacher/journal/:id` возвращает `{lesson,work,maxPoints,rows}`. Строка содержит `studentId,name,draft,points,deleted,firstPublishedAt,editableUntil,canEdit,history`.
 - `POST /api/teacher/journal/:id/draft` принимает `{studentId,points}`. Число 0 сохраняется, `null` очищает черновик. `POST /api/teacher/journal/:id/publish` принимает `{clientId}` и возвращает `{publicationId}`. Повтор с тем же ключом возвращает прежний результат. В кабинете студента `grades[].lessonScores` содержит только опубликованные оценки этого студента.

@@ -52,6 +52,7 @@ let signingOut = false;
 let activeView;
 let teacherSchedule;
 let teacherViewLoad;
+const teacherJournalFilters = { date: '', faculty: '' };
 let schedule;
 let scheduleLoad;
 let monthScheduleLoad;
@@ -224,6 +225,7 @@ function preservePagePosition(update) {
 
 function showLogin(message = '', focusHeading = false) {
   teacherSchedule = teacherViewLoad = undefined;
+  teacherJournalFilters.date = teacherJournalFilters.faculty = '';
   closeLesson(false);
   monthScheduleLoad = selectedMonth = undefined;
   setScheduleMode(false);
@@ -1547,15 +1549,51 @@ function renderTeacherContacts({ groups, contacts }) {
 }
 
 function renderTeacherJournalIndex({ lessons, recent }) {
-  const choose = panel('Журнал занятий', listFor(lessons, (lesson) => {
-    const link = anchor('#grades/journal-' + lesson.id, 'inline-link', lesson.title + ' · ' + lesson.group);
-    const row = element('div', 'cabinet-layout');
-    row.append(link, metadata([
-      ['Занятие', eventTime(lesson.date) + ', ' + lessonTimes(lesson)],
-      ['Черновик', lesson.draftCount ? 'Заполнено строк: ' + lesson.draftCount : '—'],
-    ]));
-    return row;
-  }, 'Назначенных занятий пока нет.'));
+  const list = element('div');
+  const controls = element('div', 'teacher-toolbar');
+  for (const [key, label, placeholder, format] of [
+    ['date', 'Дата занятия', 'Любая дата', (value) => dayFormat.format(dateAt(value))],
+    ['faculty', 'Факультет', 'Все факультеты', (value) => value],
+  ]) {
+    const field = element('label', 'teacher-field', label);
+    const select = element('select');
+    select.setAttribute('aria-label', label);
+    const values = [...new Set(lessons.map((lesson) => lesson[key]).filter(Boolean))].sort();
+    for (const value of ['', ...values]) {
+      const option = element('option', '', value ? format(value) : placeholder);
+      option.value = value;
+      select.append(option);
+    }
+    if (!values.includes(teacherJournalFilters[key])) teacherJournalFilters[key] = '';
+    select.value = teacherJournalFilters[key];
+    select.addEventListener('change', () => {
+      teacherJournalFilters[key] = select.value;
+      updateResults();
+    });
+    field.append(select);
+    controls.append(field);
+  }
+  function updateResults() {
+    const { date, faculty } = teacherJournalFilters;
+    if (!date && !faculty) {
+      list.replaceChildren(element('p', 'muted', lessons.length ? 'Выберите дату занятия или факультет.' : 'Назначенных занятий пока нет.'));
+      return;
+    }
+    const matching = lessons.filter((lesson) => (!date || lesson.date === date) && (!faculty || lesson.faculty === faculty));
+    list.replaceChildren(listFor(matching, (lesson) => {
+      const link = anchor('#grades/journal-' + lesson.id, 'inline-link', lesson.title + ' · ' + lesson.group);
+      const row = element('div', 'cabinet-layout');
+      row.append(link, metadata([
+        ['Занятие', eventTime(lesson.date) + ', ' + lessonTimes(lesson) + ' · ' + lesson.faculty],
+        ...(lesson.draftCount ? [['Черновик', 'Заполнено строк: ' + lesson.draftCount]] : []),
+      ]));
+      return row;
+    }, 'По этим фильтрам занятий нет.'));
+  }
+  updateResults();
+  const chooser = element('div', 'cabinet-layout');
+  chooser.append(controls, list);
+  const choose = panel('Журнал занятий', chooser);
   const history = panel('Недавние изменения', listFor(recent, (publication) => {
     const { id, title, group, publishedAt, count, canUndo, expiredCount, blockedCount } = publication;
     const details = element('details', 'record-details');
@@ -1594,10 +1632,13 @@ function renderTeacherJournalIndex({ lessons, recent }) {
     details.append(content);
     return details;
   }, 'Публикаций пока нет.'));
+  const overview = element('details', 'panel');
+  overview.append(element('summary', 'record-summary', 'Сводная успеваемость'));
   const legacy = element('div', 'cabinet-layout');
   legacy.id = 'teacher-enrollment-grades';
   if (cabinet) legacy.append(...renderGrades(cabinet.grades));
-  return [choose, history, legacy];
+  overview.append(legacy);
+  return [choose, history, overview];
 }
 
 function teacherScoreHistory(row) {

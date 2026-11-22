@@ -88,7 +88,7 @@ function sameSlot(a, b) {
 export function createTeacherWorkflows(db, { transaction, HttpError, civilDate, weekInMoscow, weekParity, matchesWeek }) {
   const prepare = (sql) => db.prepare(sql);
   const less = `
-    SELECT l.*, p.parity AS week_parity, student.student_group AS "group"
+    SELECT l.*, p.parity AS week_parity, student.student_group AS "group", student.faculty
     FROM lessons l JOIN students student ON student.id = l.student_id
     LEFT JOIN lesson_week_parity p ON p.lesson_id = l.id
     WHERE student.role = 'student'
@@ -213,7 +213,7 @@ export function createTeacherWorkflows(db, { transaction, HttpError, civilDate, 
   function bareLesson(row, date) {
     return {
       id: `${row.id}-${date}`, date, start: row.start_time, end: row.end_time,
-      title: row.title, group: row.group, room: row.room, status: 'scheduled',
+      title: row.title, group: row.group, faculty: row.faculty, room: row.room, status: 'scheduled',
       originalDate: date, originalStart: row.start_time, originalEnd: row.end_time,
       comment: date >= '2026-11-23' && date <= '2026-11-29' ? row.change ?? '' : '',
     };

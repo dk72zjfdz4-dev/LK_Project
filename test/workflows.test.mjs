@@ -344,6 +344,11 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
     UPDATE lessons SET teacher = 'Прежний преподаватель';
     UPDATE students SET full_name = 'Мария Ланская' WHERE login = 'teacher1';
     UPDATE students SET full_name = 'Даниил Андреевич Речин' WHERE login = 'student2';
+    DELETE FROM lesson_cancellations WHERE lesson_id IN (
+      SELECT l.id FROM lessons l JOIN students s ON s.id = l.student_id WHERE s.directory_only = 1
+    );
+    DELETE FROM lessons WHERE student_id IN (SELECT id FROM students WHERE directory_only = 1);
+    DELETE FROM enrollments WHERE student_id IN (SELECT id FROM students WHERE directory_only = 1);
     DELETE FROM students WHERE directory_only = 1;
     UPDATE assignments SET due_at = '2026-11-21T20:00:00.000Z' WHERE title = 'Отчёт по практикуму';
     UPDATE students SET student_group = 'МО-24-02' WHERE login = 'student1';
@@ -405,7 +410,7 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   assert.equal(studentDirectory.length, 8);
   assert.ok(studentDirectory.every(({ roleLabel, studentProfile }) => roleLabel === 'Студент' && studentProfile === undefined));
   const migrated = new DatabaseSync(env.DB_PATH, { readOnly: true });
-  assert.equal(migrated.prepare('PRAGMA user_version').get().user_version, 16);
+  assert.equal(migrated.prepare('PRAGMA user_version').get().user_version, 17);
   assert.deepEqual(migrated.prepare('SELECT student_group FROM portfolio_dean_groups').all().map(({ student_group }) => student_group), ['ГР-24-02']);
   migrated.close();
   const peer = studentDirectory.find(({ title }) => title === 'Крош Андреевич Речин');
@@ -420,7 +425,7 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   const { dialogueId: directoryThread } = await expect('/dialogues/contact/' + hedgehog.partnerId, student, {});
   await expect('/dialogues/' + directoryThread + '/messages', student, { text: 'Привет, Ёжик!' });
   assert.deepEqual((await cabinet(student)).dialogues.find(({ id }) => id === directoryThread).studentProfile, {
-    faculty: 'Когтевран', program: 'Древние руны', group: 'КО-24-01', year: 2,
+    faculty: 'Гриффиндор', program: 'Защита от тёмных искусств', group: 'ГР-24-02', year: 2,
   });
   await expect('/dialogues/' + directoryThread, other, undefined, 404);
   const mcgonagall = persisted.dialogueContacts.find(({ title }) => title === 'Минерва Макгонагалл');

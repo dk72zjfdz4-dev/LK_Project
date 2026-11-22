@@ -395,6 +395,12 @@ for (const width of [360, 1440]) {
     await scored.getByRole('button', { name: 'Восстановить' }).click();
     await expect(scored).toContainText('Опубликовано: 2');
     await navigate('#grades');
+    const dateFilter = page.getByLabel('Дата занятия');
+    const facultyFilter = page.getByLabel('Факультет', { exact: true });
+    await facultyFilter.selectOption(lesson.faculty);
+    await dateFilter.selectOption({ value: (await json('/api/teacher/journal/' + lesson.id)).lesson.date });
+    const filteredLesson = page.locator('#grades-content a[href="' + journalHash + '"]').first();
+    await expect(filteredLesson).toBeVisible();
     const recent = page.locator('.panel').filter({ has: page.getByRole('heading', { name: 'Недавние изменения' }) });
     const publication = recent.locator('li > details').first();
     await publication.locator(':scope > summary').click();
@@ -403,6 +409,7 @@ for (const width of [360, 1440]) {
     await expect(publication).toHaveJSProperty('open', false);
     await navigate(journalHash);
     await expect(draft).toHaveValue('2');
+    await expect(page.locator('.teacher-score-row')).toHaveCount(2);
     await navigate('#contacts');
     const { contacts } = await json('/api/teacher/contacts');
     const contact = contacts.find(({ role }) => role === 'dean');

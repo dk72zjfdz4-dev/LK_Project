@@ -382,6 +382,44 @@ function seedEvenLessons(db, schedule) {
   }
 }
 
+function seedJournalGroups(db) {
+  const profile = db.prepare("SELECT id, faculty, program, year, student_group FROM students WHERE login = ? AND role = 'student'");
+  const update = db.prepare('UPDATE students SET faculty = ?, program = ?, year = ?, student_group = ? WHERE id = ?');
+  const enroll = db.prepare(`
+    INSERT OR IGNORE INTO enrollments (student_id, teacher_id, subject, semester, coursework_points, coursework_max, control, result, criteria)
+    SELECT ?, teacher_id, subject, semester, 0, coursework_max, control, NULL, criteria FROM enrollments
+    WHERE student_id = ? AND semester = (SELECT MAX(semester) FROM enrollments WHERE student_id = ?)
+  `);
+  const schedule = db.prepare(`
+    SELECT l.*, p.parity FROM lessons l LEFT JOIN lesson_week_parity p ON p.lesson_id = l.id WHERE l.student_id = ? ORDER BY l.id
+  `);
+  const copyLesson = db.prepare(`
+    INSERT INTO lessons (student_id, weekday, start_time, end_time, title, room, teacher, change)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const copyParity = db.prepare('INSERT INTO lesson_week_parity (lesson_id, parity) VALUES (?, ?)');
+  const copyCancellations = db.prepare(`
+    INSERT INTO lesson_cancellations (lesson_id, date, change) SELECT ?, date, change FROM lesson_cancellations WHERE lesson_id = ?
+  `);
+  const copyChanges = db.prepare(`
+    INSERT INTO teacher_lesson_targets (change_id, lesson_id) SELECT change_id, ? FROM teacher_lesson_targets WHERE lesson_id = ?
+  `);
+  for (const [member, peer] of [['directory:yozhik', 'student1'], ['directory:losyash', 'student2']]) {
+    const student = profile.get(member);
+    const model = profile.get(peer);
+    if (!student || !model) continue;
+    update.run(model.faculty, model.program, model.year, model.student_group, student.id);
+    enroll.run(student.id, model.id, model.id);
+    if (schedule.all(student.id).length) continue;
+    for (const slot of schedule.all(model.id)) {
+      const id = copyLesson.run(student.id, slot.weekday, slot.start_time, slot.end_time, slot.title, slot.room, slot.teacher, slot.change).lastInsertRowid;
+      if (slot.parity !== null) copyParity.run(id, slot.parity);
+      copyCancellations.run(id, slot.id);
+      copyChanges.run(id, slot.id);
+    }
+  }
+}
+
 export function seedCabinet(db) {
   const version = db.prepare('PRAGMA user_version').get().user_version;
   if (version < 2) seedCabinetFixtures(db);
@@ -542,6 +580,10 @@ export function seedCabinet(db) {
     WHERE s.login = 'student1' AND s.role = 'student' AND l.weekday = 3 AND l.start_time = '10:40';
     PRAGMA user_version = 16;
   `);
+  if (version < 17) {
+    seedJournalGroups(db);
+    db.exec('PRAGMA user_version = 17');
+  }
 }
 
 function isPdf(contents) {

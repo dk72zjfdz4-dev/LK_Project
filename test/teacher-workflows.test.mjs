@@ -93,15 +93,21 @@ test('teacher lesson changes, journal lifetime, publication ownership and contac
   const contact = contacts.contacts.find((item) => item.name === student.profile.fullName);
   assert.ok(contacts.groups.includes(student.profile.group));
   assert.ok(contacts.contacts.some((item) => item.role === 'dean'));
+  for (const [peer, surname] of [[student, 'Иголкин'], [secondStudent, 'Лосяш']]) {
+    const classmate = contacts.contacts.find(({ name }) => name.includes(surname));
+    assert.equal(classmate?.group, peer.profile.group);
+    const slot = baseline.lessons.find(({ group }) => group === peer.profile.group);
+    assert.equal(slot.faculty, peer.profile.faculty);
+    const { rows } = await get('/api/teacher/journal/' + slot.id, teacher);
+    const peerContact = contacts.contacts.find(({ name }) => name === peer.profile.fullName);
+    assert.deepEqual(new Set(rows.map(({ studentId }) => studentId)), new Set([peerContact.id, classmate.id]));
+  }
   const contactRoute = '/api/teacher/contacts/' + contact.id + '/dialogue';
   const opened = await write(contactRoute, {});
   assert.equal((await write(contactRoute, {})).dialogueId, opened.dialogueId);
   await write(contactRoute, {}, other, 404);
 
-  // A second enrollment in the same temporary demo group exercises partial publication and independent deadlines.
   db = new DatabaseSync(path);
-  const group = student.profile.group;
-  db.prepare("UPDATE students SET student_group = ? WHERE login = 'student2'").run(group);
   const journalRoute = '/api/teacher/journal/' + lesson.id;
   const grades = async () => (await get('/api/cabinet', student)).grades.find((row) => row.subject === lesson.title && row.semester === 2);
   const initialPoints = (await grades()).points;
