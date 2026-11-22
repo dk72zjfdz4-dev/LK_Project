@@ -7,6 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { createCabinet, installCabinet, seedCabinet } from './cabinet.mjs';
+import { createTeacherWorkflows, installTeacherWorkflows } from './teacher.mjs';
 
 const root = realpathSync(fileURLToPath(new URL('.', import.meta.url)));
 const publicDirectory = realpathSync(resolve(root, 'public'));
@@ -172,7 +173,10 @@ db.exec(`
   ) STRICT;
   CREATE INDEX IF NOT EXISTS sessions_expires_at ON sessions(expires_at);
 `);
-transaction(() => installCabinet(db));
+transaction(() => {
+  installCabinet(db);
+  installTeacherWorkflows(db);
+});
 
 const studentByLogin = db.prepare('SELECT * FROM students WHERE login = ? AND directory_only = 0');
 const profileBySession = db.prepare(`
@@ -307,16 +311,19 @@ function matchesWeek(row, parity) {
   return row.week_parity === null || row.week_parity === parity;
 }
 
-function weekLessons(rows, monday, offset, cancellations) {
+function weekLessons(studentId, rows, monday, offset, cancellations) {
   const start = new Date(monday);
   start.setUTCDate(start.getUTCDate() + offset);
   const parity = weekParity(start);
-  return rows.filter((row) => matchesWeek(row, parity)).map((row) => {
+  const lessons = rows.filter((row) => matchesWeek(row, parity)).map((row) => {
     const date = new Date(start);
     date.setUTCDate(date.getUTCDate() + row.weekday - 1);
     const day = civilDate(date);
     return lessonOn(row, day, cancellations.get(`${row.id}-${day}`));
   });
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 6);
+  return teacher.changedStudentLessons(studentId, civilDate(start), civilDate(end), lessons, (id) => lessonById(studentId, id));
 }
 
 function schedule(studentId, week = null) {
@@ -335,8 +342,8 @@ function schedule(studentId, week = null) {
     .map(({ lesson_id, date, change }) => [`${lesson_id}-${date}`, change]));
   const data = {
     today, weekStart,
-    lessons: weekLessons(rows, monday, 0, cancellations),
-    nextWeekLessons: weekLessons(rows, monday, 7, cancellations),
+    lessons: weekLessons(studentId, rows, monday, 0, cancellations),
+    nextWeekLessons: weekLessons(studentId, rows, monday, 7, cancellations),
   };
   if (selectedMonday) {
     const nextMonday = new Date(monday);
@@ -349,7 +356,7 @@ function schedule(studentId, week = null) {
       sunday.setUTCDate(sunday.getUTCDate() + 6);
       const selectedCancellations = new Map(cancelledLessons.all(studentId, week, civilDate(sunday))
         .map(({ lesson_id, date, change }) => [`${lesson_id}-${date}`, change]));
-      lessons = weekLessons(rows, selectedMonday, 0, selectedCancellations);
+      lessons = weekLessons(studentId, rows, selectedMonday, 0, selectedCancellations);
     }
     data.selectedWeek = { weekStart: week, lessons };
   }
@@ -374,7 +381,10 @@ function monthSchedule(studentId, month) {
       lessons.push(lessonOn(row, date, cancellations.get(`${row.id}-${date}`)));
     }
   }
-  return { month, today: weekInMoscow().today, lessons };
+  return {
+    month, today: weekInMoscow().today,
+    lessons: teacher.changedStudentLessons(studentId, civilDate(first), civilDate(last), lessons, (id) => lessonById(studentId, id)),
+  };
 }
 
 function lessonById(studentId, id) {
@@ -496,7 +506,9 @@ async function api(request, response, path) {
   const isReadRoute = method === 'GET'
     && (path === '/api/me' || path === '/api/schedule' || path === '/api/search' || path === '/api/help' || lessonPath);
   const cabinetRoute = cabinet.match(method, path);
-  if (!isReadRoute && !cabinetRoute) throw new HttpError(404, 'Страница не найдена.');
+  const teacherRead = method === 'GET' && /^\/api\/teacher\/(schedule|journal|contacts)(?:\/([1-9]\d{0,14}-\d{4}-\d{2}-\d{2}))?$/.exec(path);
+  const teacherWrite = method === 'POST' && /^\/api\/teacher\/(lessons|journal|publications|contacts)\/([1-9]\d{0,14}(?:-\d{4}-\d{2}-\d{2})?)\/(change|draft|publish|score|undo|dialogue)$/.exec(path);
+  if (!isReadRoute && !cabinetRoute && !teacherRead && !teacherWrite) throw new HttpError(404, 'Страница не найдена.');
   const token = sessionHash(request);
   function authenticate() {
     const account = token ? profileBySession.get(token, Date.now()) : null;
@@ -504,6 +516,39 @@ async function api(request, response, path) {
     return account;
   }
   const account = authenticate();
+  if (teacherRead || teacherWrite) {
+    if (account.role !== 'teacher') throw new HttpError(403, 'Раздел доступен преподавателям.');
+    if (teacherRead) {
+      const [, section, id] = teacherRead;
+      if (section === 'journal') return json(response, 200, id ? teacher.journal(account.id, id) : teacher.journalIndex(account.id));
+      if (!id && section === 'schedule') {
+        const params = new URLSearchParams(request.url.slice(path.length + 1));
+        return json(response, 200, teacher.teacherWeek(account.id, params.get('week')));
+      }
+      if (!id && section === 'contacts') return json(response, 200, teacher.contacts(account.id));
+      throw new HttpError(404, 'Страница не найдена.');
+    }
+    if (!sameOrigin(request)) throw new HttpError(403, 'Запрос с другого сайта отклонён.');
+    const body = await jsonBody(request);
+    const viewer = authenticate();
+    if (viewer.role !== 'teacher') throw new HttpError(403, 'Раздел доступен преподавателям.');
+    const [, section, id, action] = teacherWrite;
+    if (section === 'lessons' && action === 'change') return json(response, 200, teacher.changeLesson(viewer.id, id, body));
+    if (section === 'journal' && action === 'draft') return json(response, 200, teacher.draft(viewer.id, id, body));
+    if (section === 'journal' && action === 'publish') return json(response, 200, teacher.publish(viewer.id, id, body));
+    if (section === 'journal' && action === 'score') return json(response, 200, teacher.editScore(viewer.id, id, body));
+    if (section === 'publications' && action === 'undo' && !id.includes('-')) {
+      return json(response, 200, teacher.undo(viewer.id, Number(id)));
+    }
+    if (section === 'contacts' && action === 'dialogue' && !id.includes('-')) {
+      const partnerId = Number(id);
+      if (!teacher.contacts(viewer.id).contacts.some(({ id }) => id === partnerId)) {
+        throw new HttpError(404, 'Контакт недоступен.');
+      }
+      return json(response, 200, cabinet.openDirectoryDialogue(viewer, partnerId));
+    }
+    throw new HttpError(404, 'Страница не найдена.');
+  }
   if (cabinetRoute) {
     if (method === 'POST' && !sameOrigin(request)) throw new HttpError(403, 'Запрос с другого сайта отклонён.');
     return cabinet.handle(cabinetRoute, request, response, account, authenticate);
@@ -528,7 +573,7 @@ async function api(request, response, path) {
 
   const lesson = lessonById(account.id, lessonPath[1]);
   if (!lesson) throw new HttpError(404, 'Занятие не найдено.');
-  return json(response, 200, { lesson });
+  return json(response, 200, { lesson: teacher.studentLessonDetails(account.id, lesson) });
 }
 
 async function staticResponse(request, response, path) {
@@ -576,7 +621,8 @@ async function handleRequest(request, response) {
 
 const reset = process.argv.includes('--reset-demo-passwords');
 seedDemos(reset);
-const cabinet = reset ? null : createCabinet(db, { transaction, HttpError, bytesBody, jsonBody, json });
+const teacher = reset ? null : createTeacherWorkflows(db, { transaction, HttpError, civilDate, weekInMoscow, weekParity, matchesWeek });
+const cabinet = reset ? null : createCabinet(db, { transaction, HttpError, bytesBody, jsonBody, json, projectGrades: teacher.projectGrades });
 if (reset) {
   db.close();
 } else {

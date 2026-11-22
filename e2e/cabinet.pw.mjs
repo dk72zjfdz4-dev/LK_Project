@@ -325,8 +325,122 @@ test('teacher login and role-specific navigation', async ({ page, cabinet }) => 
   await expect(page.locator('#sidebar-initials')).toHaveText('СС');
   await expandGroup(navigation, 'Учёба');
   await expect(navigation.getByRole('link', { name: 'Задания' })).toBeVisible();
+  await expect(navigation.getByRole('link', { name: 'Расписание' })).toBeVisible();
   await expect(navigation.getByRole('link', { name: 'Справки и документы' })).toHaveCount(0);
 });
+
+for (const width of [360, 1440]) {
+  test(`teacher schedule, journal and attachments at ${width} px`, async ({ page, cabinet }) => {
+    await page.setViewportSize({ width, height: 820 });
+    await login(page, cabinet, 'teacher');
+    const json = async (path) => (await page.request.get(cabinet.origin + path)).json();
+    const navigate = (hash) => page.evaluate((value) => { globalThis.location.hash = value; }, hash);
+    const { lessons } = await json('/api/teacher/schedule');
+    const lesson = lessons.find(({ status }) => status === 'scheduled');
+    expect(lesson).toBeDefined();
+    if (width === 360) await page.locator('.mobile-tabs [data-view=schedule]').click();
+    else {
+      const nav = page.locator('.sidebar nav');
+      await expandGroup(nav, 'Учёба');
+      await nav.getByRole('link', { name: 'Расписание', exact: true }).click();
+    }
+    const getLesson = () => page.locator('#lesson-' + lesson.id);
+    await expect(getLesson()).toContainText(lesson.group);
+    await getLesson().getByRole('button', { name: lesson.title }).click();
+    await page.getByRole('button', { name: 'Выставить баллы' }).click();
+    const draft = page.locator('.teacher-journal input[type=number]').first();
+    await draft.fill('11');
+    await expect(page.getByText('Введите балл от 0 до 10.')).toBeVisible();
+    await draft.fill('0');
+    await expect(page.getByText('Черновик сохранён')).toBeVisible();
+    const journalHash = new URL(page.url()).hash;
+    if (width === 360) {
+      const logout = await page.request.post(cabinet.origin + '/api/logout', { headers: { Origin: cabinet.origin } });
+      expect(logout.ok()).toBe(true);
+      await login(page, cabinet, 'teacher');
+      await navigate(journalHash);
+    } else await page.reload();
+    await expect(draft).toHaveValue('0');
+    await expect(page.getByText(/Заполнено для публикации: 1/)).toBeVisible();
+    await page.getByRole('button', { name: 'Опубликовать заполненные строки' }).click();
+    await expect(page.getByText('Опубликовано: 0', { exact: true })).toBeVisible();
+    await fits(page);
+    await navigate('#schedule');
+    await getLesson().getByRole('button', { name: lesson.title }).click();
+    await page.getByRole('button', { name: 'Перенести', exact: true }).click();
+    if (width === 1440) {
+      const nextWeek = new Date(lesson.date + 'T00:00:00Z');
+      nextWeek.setUTCDate(nextWeek.getUTCDate() + 7);
+      await page.getByLabel('Новая дата').fill(nextWeek.toISOString().slice(0, 10));
+    }
+    await page.getByLabel('Начало', { exact: true }).fill(width === 360 ? '21:00' : '22:00');
+    await page.getByLabel('Окончание', { exact: true }).fill(width === 360 ? '21:30' : '22:30');
+    await page.getByLabel('Комментарий для студентов').fill('Демонстрационный перенос');
+    await expect(page.getByText(/Было:.*Новый слот:/)).toBeVisible();
+    await page.getByRole('button', { name: 'Подтвердить перенос' }).click();
+    await expect(getLesson()).toContainText('Перенесено');
+    await getLesson().getByRole('button', { name: lesson.title }).click();
+    await page.getByRole('button', { name: 'Отменить занятие' }).click();
+    await expect(page.getByText(/Отменяется.*Группа:/)).toBeVisible();
+    await page.getByRole('button', { name: 'Подтвердить отмену' }).click();
+    await expect(getLesson()).toContainText('Отменено');
+    await navigate(journalHash);
+    await expect(page.getByText('Опубликовано: 0', { exact: true })).toBeVisible();
+    const scored = page.locator('.teacher-score-row').first();
+    await scored.locator('input[type=number]').fill('2');
+    await scored.getByRole('button', { name: 'Сохранить исправление' }).click();
+    await expect(scored).toContainText('Опубликовано: 2');
+    await scored.getByRole('button', { name: 'Удалить балл' }).click();
+    await expect(scored).toContainText('Балл удалён');
+    await scored.getByRole('button', { name: 'Восстановить' }).click();
+    await expect(scored).toContainText('Опубликовано: 2');
+    await navigate('#grades');
+    const recent = page.locator('.panel').filter({ has: page.getByRole('heading', { name: 'Недавние изменения' }) });
+    const publication = recent.locator('li > details').first();
+    await publication.locator(':scope > summary').click();
+    await publication.getByText('Отменить публикацию', { exact: true }).click();
+    await publication.getByRole('button', { name: 'Подтвердить отмену публикации' }).click();
+    await expect(publication).toHaveJSProperty('open', false);
+    await navigate(journalHash);
+    await expect(draft).toHaveValue('2');
+    await navigate('#contacts');
+    const { contacts } = await json('/api/teacher/contacts');
+    const contact = contacts.find(({ role }) => role === 'dean');
+    await page.getByLabel('Поиск по имени').fill(contact.name);
+    await page.locator('.teacher-contact').getByRole('button', { name: 'Написать' }).click();
+    const composer = page.locator('#message-text');
+    const selection = page.locator('#message-file-input');
+    await expect(composer).toBeVisible();
+    await selection.setInputFiles('test/fixtures/work.docx');
+    await expect(page.locator('#message-files')).toContainText('work.docx');
+    await page.getByRole('button', { name: 'Убрать work.docx' }).click();
+    await expect(page.locator('#message-files')).toBeHidden();
+    await selection.setInputFiles(width === 360 ? 'test/fixtures/work.docx'
+      : ['test/fixtures/work.docx', 'public/assets/auth/winter-day.png']);
+    if (width === 360) {
+      await composer.fill('Документ к сообщению');
+      await page.route('**/api/dialogues/*/messages', (route) => route.abort('failed'), { times: 1 });
+    }
+    await page.getByRole('button', { name: 'Отправить', exact: true }).click();
+    if (width === 360) {
+      await expect(composer).toHaveValue('Документ к сообщению');
+      await page.getByRole('button', { name: 'Повторить', exact: true }).click();
+    }
+    const file = page.getByRole('link', { name: 'Скачать work.docx' }).last();
+    await expect(file).toBeVisible();
+    if (width === 1440) {
+      const preview = page.getByRole('img', { name: 'winter-day.png' });
+      await expect(preview).toBeVisible();
+      expect(await preview.evaluate(async (image) => {
+        await image.decode();
+        return image.naturalWidth;
+      })).toBeGreaterThan(0);
+    }
+    const [download] = await Promise.all([page.waitForEvent('download'), file.click()]);
+    expect(download.suggestedFilename()).toBe('work.docx');
+    await fits(page);
+  });
+}
 
 test('header search matches word prefixes and links to the chosen semester', async ({ page, cabinet }) => {
   await login(page, cabinet);
@@ -1345,7 +1459,7 @@ for (const [role, unavailable] of [['teacher', 'Справки и докумен
     await page.setViewportSize({ width: 390, height: 650 });
     await login(page, cabinet, role);
     const tabs = page.locator('.mobile-tabs');
-    await expect(tabs.getByRole('link', { name: 'Расписание' })).toHaveCount(0);
+    await expect(tabs.getByRole('link', { name: 'Расписание' })).toHaveCount(role === 'teacher' ? 1 : 0);
     await tabs.getByRole('link', { name: 'Меню' }).click();
     await expandGroup(page.locator('#mobile-nav'), 'Учёба');
     await expandGroup(page.locator('#mobile-nav'), 'Сервисы');

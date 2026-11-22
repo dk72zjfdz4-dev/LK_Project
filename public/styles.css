@@ -1477,6 +1477,30 @@ details[open] > .record-summary::before { transform: rotate(45deg); }
 #message-submit:disabled { cursor: default; }
 #message-form[aria-busy="true"] #message-submit:disabled { cursor: wait; }
 .message-form .local-error { font-size: .85rem; }
+.message-input-row:has(#message-attach) { grid-template-columns: auto auto minmax(0, 1fr) auto; }
+.message-files { display: grid; gap: 3px; max-height: 104px; overflow: auto; }
+.message-file { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: .82rem; }
+.message-file span, .message-attachment { min-width: 0; overflow-wrap: anywhere; }
+.message-file .button { flex: none; min-height: 36px; padding: 3px 8px; font-size: .82rem; }
+#message-upload { width: 100%; accent-color: var(--primary); }
+.message .record-list .record-row { display: block; }
+.message-attachment { display: grid; gap: 3px; font-size: .86rem; }
+.message-attachment img { display: block; max-width: min(100%, 240px); max-height: 160px; object-fit: contain; border-radius: 8px; }
+.message-attachment .inline-link { min-height: 32px; width: fit-content; }
+
+.teacher-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.teacher-toolbar .button { min-height: 44px; }
+.teacher-field { display: grid; gap: 4px; min-width: 0; font-weight: 600; }
+.teacher-field :is(input, textarea, select) {
+  width: 100%; min-height: 44px; padding: 7px 10px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--ink);
+}
+.teacher-field input[type="number"] { width: min(100%, 180px); font-size: 1rem; }
+.teacher-lesson, .teacher-contact, .teacher-score-row { display: grid; gap: 6px; padding: 10px; }
+.teacher-change-form, .teacher-journal { max-width: none; }
+.teacher-score-row .button { justify-self: start; }
+.calendar-changed { border-inline-start: 3px solid #b96619; background-color: var(--peach); }
+.month-lesson.calendar-changed .change-label { font-size: .68rem; }
 .contact-actions, .request-document-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .contact-actions .inline-link, .request-document-actions .inline-link { display: inline-flex; align-items: center; min-height: 44px; }
 .contact-mail-picker[open] { flex-basis: 100%; }

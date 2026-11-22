@@ -17,7 +17,7 @@ const views = {
 };
 const roleViews = {
   student: Object.keys(views),
-  teacher: ['home', 'grades', 'assignments', 'library', 'messages', 'contacts', 'updates', 'campus', 'profile', 'menu'],
+  teacher: ['home', 'schedule', 'grades', 'assignments', 'library', 'messages', 'contacts', 'updates', 'campus', 'profile', 'menu'],
   dean: ['home', 'requests', 'library', 'messages', 'contacts', 'updates', 'campus', 'profile', 'menu'],
 };
 const roleNames = { student: 'Студент', teacher: 'Преподаватель', dean: 'Деканат' };
@@ -50,6 +50,8 @@ const scheduleAreas = [
 let profile;
 let signingOut = false;
 let activeView;
+let teacherSchedule;
+let teacherViewLoad;
 let schedule;
 let scheduleLoad;
 let monthScheduleLoad;
@@ -166,6 +168,7 @@ function route(focusHeading = false) {
   byId('header-inbox').hidden = active !== 'home';
   document.title = views[active] + ' — Личный кабинет';
   renderCabinet();
+  if (profile.role === 'teacher') loadTeacherView(active, targetId);
   if (active === 'requests' && profile.role === 'student') loadHelpCatalog();
   if (active === 'library') loadLibrary();
   if (active === 'profile') loadPortfolio();
@@ -220,6 +223,7 @@ function preservePagePosition(update) {
 }
 
 function showLogin(message = '', focusHeading = false) {
+  teacherSchedule = teacherViewLoad = undefined;
   closeLesson(false);
   monthScheduleLoad = selectedMonth = undefined;
   setScheduleMode(false);
@@ -318,6 +322,11 @@ function showLogin(message = '', focusHeading = false) {
 
 function showApp(account, focusHeading = false) {
   profile = { ...account, role: account.role || 'student' };
+  byId('teacher-schedule').hidden = profile.role !== 'teacher';
+  if (profile.role === 'teacher') {
+    byId('week-status').hidden = true;
+    byId('week-schedule').hidden = true;
+  }
   for (const [id, field] of Object.entries(profileFields)) {
     const fieldNode = byId(id);
     fieldNode.textContent = account[field] ?? '';
@@ -373,10 +382,19 @@ function lessonTimes(lesson) {
 function lessonDetails(lesson) {
   const details = element('div', 'lesson-details');
   details.append(
-    element('span', 'lesson-room', 'Демо-ауд. ' + lesson.room),
-    element('span', 'lesson-teacher', lesson.teacher),
+    element('span', 'lesson-room', lesson.room ? (lesson.group || lesson.status ? '' : 'Демо-ауд. ') + lesson.room : 'Аудитория не указана'),
+    element('span', 'lesson-teacher', lesson.group || lesson.teacher),
   );
   return details;
+}
+
+function lessonChange(lesson) {
+  if (lesson.status === 'moved') {
+    return 'Перенесено · ранее ' + dateFormat.format(dateAt(lesson.originalDate)) + ', '
+      + lesson.originalStart + '–' + lesson.originalEnd + (lesson.comment ? ' · ' + lesson.comment : '');
+  }
+  if (lesson.status === 'cancelled') return 'Отменено' + (lesson.comment ? ' · ' + lesson.comment : '');
+  return lesson.change || (lesson.cancelled ? 'Отменено' : '');
 }
 
 function lessonTitle(lesson, level) {
@@ -437,13 +455,16 @@ async function openLesson(id, trigger) {
   content.replaceChildren(element('p', 'muted', 'Загружаем занятие…'));
   if (!dialog.open) dialog.showModal();
   try {
-    const { lesson } = await request(resource('/api/lessons', id));
+    const { lesson } = profile.role === 'teacher'
+      ? { lesson: teacherSchedule.lessons.find((item) => item.id === id) }
+      : await request(resource('/api/lessons', id));
     if (!dialog.open || lessonOpen !== load || profile !== load.account) return;
     byId('lesson-dialog-heading').textContent = lesson.title;
     content.replaceChildren(element('p', 'muted', dateFormat.format(dateAt(lesson.date)) + ' · ' + lessonTimes(lesson)), lessonDetails(lesson));
-    if (lesson.contact) content.append(contactCard(lesson.contact, { canMessage: true }));
+    if (profile.role === 'teacher') content.append(teacherLessonActions(lesson, load));
+    else if (lesson.contact) content.append(contactCard(lesson.contact, { canMessage: true }));
     else content.append(element('p', 'muted', 'Контакты преподавателя пока недоступны.'));
-    if (lesson.change || lesson.cancelled) content.append(element('p', 'change-label', lesson.change || 'Занятие отменено.'));
+    if (lessonChange(lesson)) content.append(element('p', 'change-label', lessonChange(lesson)));
   } catch (error) {
     if (profile !== load.account || lessonOpen !== load) return;
     if (!endSession(error)) content.replaceChildren(element('p', 'local-error', error.message));
@@ -458,7 +479,7 @@ function upcomingRow(lesson, today) {
   slot.append(date, element('span', 'lesson-time', lessonTimes(lesson)));
   const info = element('div', 'upcoming-info');
   info.append(lessonTitle(lesson, 'h3'), lessonDetails(lesson));
-  if (lesson.change) info.append(element('p', 'change-label', lesson.change));
+  if (lessonChange(lesson)) info.append(element('p', 'change-label', lessonChange(lesson)));
   row.append(slot, info);
   return row;
 }
@@ -468,7 +489,7 @@ function changeRow(lesson, today) {
   row.append(
     lessonTitle(lesson, 'h3'),
     element('p', 'change-date', (lesson.date === today ? 'Сегодня' : dateFormat.format(dateAt(lesson.date))) + ' · ' + lesson.start),
-    element('p', 'change-label', lesson.change || 'Занятие отменено.'),
+    element('p', 'change-label', lessonChange(lesson)),
   );
   return row;
 }
@@ -524,7 +545,7 @@ function selectHomeDay(date) {
     const row = element('li', 'home-day-row');
     row.append(element('p', 'lesson-time', lessonTimes(lesson)), lessonTitle(lesson, 'h4'), lessonDetails(lesson));
     if (lesson.cancelled) row.classList.add('calendar-cancelled');
-    if (lesson.change || lesson.cancelled) row.append(element('p', 'change-label', lesson.change || 'Занятие отменено.'));
+    if (lessonChange(lesson)) row.append(element('p', 'change-label', lessonChange(lesson)));
     return row;
   }, 'В этот день занятий нет.');
   day.replaceChildren(heading, contents);
@@ -544,7 +565,7 @@ function calendarDay(date, day, today, lessons, cardPrefix = 'lesson-') {
   }
   column.append(header);
   renderList(column.appendChild(element('div', 'day-lessons')), lessons, (lesson) => {
-    const card = element('li', 'calendar-card');
+    const card = element('li', 'calendar-card' + (lesson.status === 'moved' || lesson.status === 'cancelled' ? ' calendar-changed' : ''));
     card.id = cardPrefix + lesson.id;
     card.append(
       element('p', 'lesson-time', lessonTimes(lesson)),
@@ -552,7 +573,7 @@ function calendarDay(date, day, today, lessons, cardPrefix = 'lesson-') {
       lessonDetails(lesson),
     );
     if (lesson.cancelled) card.classList.add('calendar-cancelled');
-    if (lesson.change || lesson.cancelled) card.append(element('p', 'change-label', lesson.change || 'Занятие отменено.'));
+    if (lessonChange(lesson)) card.append(element('p', 'change-label', lessonChange(lesson)));
     return card;
   }, 'Нет занятий');
   return column;
@@ -678,13 +699,15 @@ function renderMonth({ month, today, lessons }) {
     dayButtons.push({ button, date, select });
     const list = element('ul', 'month-lessons');
     for (const lesson of entries) {
-      const row = element('li', lesson.cancelled ? 'month-lesson calendar-cancelled' : 'month-lesson');
+      const row = element('li', 'month-lesson' + (lesson.cancelled ? ' calendar-cancelled' : '')
+        + (lesson.status === 'moved' || lesson.status === 'cancelled' ? ' calendar-changed' : ''));
       const link = element('button', 'lesson-link');
       link.type = 'button';
       link.append(element('span', 'lesson-time', lesson.start), element('span', '', lesson.title));
       if (lesson.cancelled) link.append(element('span', 'visually-hidden', ', отменено'));
       link.addEventListener('click', () => openLesson(lesson.id, link));
       row.append(link);
+      if (lesson.status === 'moved' || lesson.status === 'cancelled') row.append(element('p', 'change-label', lessonChange(lesson)));
       list.append(row);
     }
     cell.append(button, list);
@@ -901,8 +924,8 @@ function renderCabinet(force = false) {
     case 'grades':
       if (profile.role === 'student') {
         renderSection('grades-content', [cabinet.grades, cabinet.assignments, cabinet.appeals], renderStudentGrades, force);
-      } else {
-        renderSection('grades-content', cabinet.grades, renderGrades, force);
+      } else if (byId('teacher-enrollment-grades')) {
+        renderSection('teacher-enrollment-grades', cabinet.grades, renderGrades, force);
       }
       break;
     case 'assignments':
@@ -917,7 +940,7 @@ function renderCabinet(force = false) {
       renderDialogueContact(cabinet.dialogues.find((item) => item.id === selectedDialogue));
       break;
     case 'contacts':
-      renderSection('contacts-content', cabinet.contacts ?? [], renderContacts, force);
+      if (profile.role !== 'teacher') renderSection('contacts-content', cabinet.contacts ?? [], renderContacts, force);
       break;
     case 'updates':
       renderSection('updates-content', cabinet.notifications, renderUpdates, force);
@@ -1179,6 +1202,12 @@ function studentGradeBreakdown(grade, assignments, appealsBySubmission) {
   content.append(metadata([
     ['Ранее учтённые баллы без детализации', gradeScore(grade.courseworkPoints, grade.courseworkMax)],
   ]));
+  if (grade.lessonScores?.length) content.append(listFor(grade.lessonScores, (score) => {
+    const row = element('div', 'record-line');
+    row.append(element('span', '', score.title + ' · ' + eventTime(score.date)),
+      element('span', 'grade-score', gradeScore(score.points, score.maxPoints)));
+    return row;
+  }));
   if (assignments.length) {
     content.append(listFor(assignments, (item) => {
       const row = element('div', 'record-line');
@@ -1329,6 +1358,416 @@ function renderContacts(contacts) {
   const offices = contacts.filter(({ role }) => role === 'dean');
   if (offices.length) sections.push(panel('Службы университета', listFor(offices, card)));
   return sections;
+}
+
+function actionButton(text, action, primary = false) {
+  const button = element('button', 'button ' + (primary ? 'button-primary' : 'button-secondary'), text);
+  button.type = 'button';
+  button.addEventListener('click', action);
+  return button;
+}
+
+function teacherField(label, type, value = '') {
+  const field = element('label', 'teacher-field', label);
+  const input = element(type === 'textarea' ? 'textarea' : 'input');
+  if (type !== 'textarea') input.type = type;
+  input.value = value;
+  field.append(input);
+  return { field, input };
+}
+
+function teacherError() {
+  const output = element('p', 'local-error');
+  output.setAttribute('role', 'alert');
+  return output;
+}
+
+function teacherFeedback(output, error) {
+  if (!endSession(error)) output.textContent = error.message;
+}
+
+async function loadTeacherView(view, target, week) {
+  if (!['schedule', 'grades', 'contacts'].includes(view)) return;
+  const content = byId({ schedule: 'teacher-schedule', grades: 'grades-content', contacts: 'contacts-content' }[view]);
+  const load = { account: profile };
+  teacherViewLoad = load;
+  const current = () => teacherViewLoad === load && profile === load.account && activeView === view;
+  const id = target?.startsWith('journal-') ? target.slice(8) : undefined;
+  const path = view === 'schedule' ? '/api/teacher/schedule' + (week ? '?week=' + encodeURIComponent(week) : '')
+    : view === 'contacts' ? '/api/teacher/contacts' : id ? resource('/api/teacher/journal', id) : '/api/teacher/journal';
+  content.replaceChildren(element('p', 'muted', 'Загрузка…'));
+  try {
+    const data = await request(path);
+    if (!current()) return;
+    if (view === 'schedule') {
+      teacherSchedule = data;
+      content.replaceChildren(renderTeacherSchedule(data));
+    } else if (view === 'contacts') content.replaceChildren(renderTeacherContacts(data));
+    else content.replaceChildren(...(id ? [renderTeacherJournal(data)] : renderTeacherJournalIndex(data)));
+  } catch (error) {
+    if (!current() || endSession(error)) return;
+    content.replaceChildren(element('p', 'local-error', error.message),
+      actionButton('Повторить', () => loadTeacherView(view, target, week)));
+  }
+}
+
+function renderTeacherSchedule({ weekStart, lessons }) {
+  const dates = weekDates(weekStart);
+  const heading = element('div', 'teacher-toolbar');
+  const step = (offset) => {
+    const day = dateAt(weekStart);
+    day.setUTCDate(day.getUTCDate() + offset);
+    loadTeacherView('schedule', undefined, day.toISOString().slice(0, 10));
+  };
+  heading.append(actionButton('‹', () => step(-7)), element('strong', '', dateFormat.formatRange(dates[0], dates.at(-1))),
+    actionButton('›', () => step(7)));
+  heading.firstElementChild.setAttribute('aria-label', 'Предыдущая неделя');
+  heading.lastElementChild.setAttribute('aria-label', 'Следующая неделя');
+  const body = element('div', 'cabinet-layout');
+  body.append(heading, listFor(lessons, (lesson) => {
+    const row = element('article', 'teacher-lesson' + (lessonChange(lesson) ? ' calendar-changed' : ''));
+    row.id = 'lesson-' + lesson.id;
+    row.append(lessonTitle(lesson, 'h3'), element('p', 'lesson-time', eventTime(lesson.date) + ' · ' + lessonTimes(lesson)),
+      lessonDetails(lesson), element('p', lessonChange(lesson) ? 'change-label' : 'muted', lessonChange(lesson) || 'Запланировано'));
+    return row;
+  }, 'На этой неделе назначенных занятий нет.'));
+  return panel('Мои занятия', body);
+}
+
+function teacherLessonActions(lesson, load) {
+  const wrapper = element('div', 'cabinet-layout');
+  const actions = element('div', 'teacher-toolbar');
+  const edit = element('div');
+  actions.append(actionButton('Перенести', () => showChange('move')),
+    actionButton('Отменить занятие', () => showChange('cancel')),
+    actionButton('Выставить баллы', (event) => {
+      closeLesson(false);
+      navigateFromLink('#grades/journal-' + lesson.id, event);
+    }, true));
+  if (lesson.status === 'cancelled') {
+    for (const button of [...actions.children].slice(0, 2)) button.disabled = true;
+  }
+  wrapper.append(actions, edit);
+  function showChange(action) {
+    const form = element('form', 'cabinet-form teacher-change-form');
+    const summary = element('p', 'muted');
+    const { field: commentField, input: comment } = teacherField('Комментарий для студентов', 'textarea');
+    comment.maxLength = 500;
+    const fields = action === 'move' ? [
+      teacherField('Новая дата', 'date', lesson.date),
+      teacherField('Начало', 'time', lesson.start),
+      teacherField('Окончание', 'time', lesson.end),
+      teacherField('Аудитория или формат', 'text', lesson.room),
+    ] : [];
+    const [day, start, end, room] = fields.map(({ input }) => input);
+    const oldSlot = eventTime(lesson.date) + ', ' + lessonTimes(lesson);
+    function describe() {
+      summary.textContent = action === 'move'
+        ? 'Было: ' + oldSlot + '. Новый слот: ' + (eventTime(day.value) || '—') + ', ' + start.value + '–' + end.value + '.'
+        : 'Отменяется «' + lesson.title + '», ' + oldSlot + '. Группа: ' + lesson.group + '.';
+    }
+    const submit = element('button', 'button button-primary', action === 'move' ? 'Подтвердить перенос' : 'Подтвердить отмену');
+    submit.type = 'submit';
+    const error = teacherError();
+    if (room) room.maxLength = 100;
+    for (const { field, input } of fields) {
+      input.required = input !== room;
+      form.append(field);
+    }
+    form.append(commentField, summary, submit, error);
+    describe();
+    form.addEventListener('input', describe);
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (submit.disabled) return;
+      submit.disabled = true;
+      error.textContent = '';
+      try {
+        const { lesson: updated } = await post(resource('/api/teacher/lessons', lesson.id, '/change'), {
+          action, comment: comment.value,
+          ...(day && { date: day.value, start: start.value, end: end.value, room: room.value }),
+        });
+        if (profile !== load.account) return;
+        if (lessonOpen === load) closeLesson(false);
+        if (activeView === 'schedule') {
+          const week = dateAt(updated.date);
+          week.setUTCDate(week.getUTCDate() - (week.getUTCDay() + 6) % 7);
+          await loadTeacherView('schedule', undefined, week.toISOString().slice(0, 10));
+          byId('lesson-' + updated.id)?.querySelector('.lesson-link')?.focus({ preventScroll: true });
+        }
+        byId('action-status').textContent = action === 'move' ? 'Занятие перенесено.' : 'Занятие отменено.';
+      } catch (failure) {
+        if (profile === load.account && lessonOpen === load) teacherFeedback(error, failure);
+      } finally {
+        submit.disabled = false;
+      }
+    });
+    edit.replaceChildren(form);
+    (day ?? comment).focus();
+  }
+  return wrapper;
+}
+
+function renderTeacherContacts({ groups, contacts }) {
+  const search = teacherField('Поиск по имени', 'search');
+  const groupLabel = element('label', 'teacher-field', 'Группа');
+  const group = element('select');
+  for (const value of ['', ...groups]) {
+    const option = element('option', '', value || 'Все группы');
+    option.value = value;
+    group.append(option);
+  }
+  groupLabel.append(group);
+  const controls = element('div', 'teacher-toolbar');
+  controls.append(search.field, groupLabel);
+  const results = element('div', 'cabinet-layout');
+  const updateResults = () => {
+    const query = search.input.value.trim().toLocaleLowerCase('ru');
+    const matching = contacts.filter((contact) => contact.name.toLocaleLowerCase('ru').includes(query)
+      && (!group.value || contact.group === group.value || contact.role === 'dean'));
+    results.replaceChildren(listFor(matching, (contact) => {
+      const row = element('article', 'teacher-contact');
+      const error = teacherError();
+      const write = actionButton('Написать', (event) => startDialogue(
+        resource('/api/teacher/contacts', contact.partnerId ?? contact.id, '/dialogue'), write, error, event,
+      ));
+      row.append(element('h3', '', contact.name),
+        element('p', 'muted', [contact.roleLabel, contact.group || contact.department].filter(Boolean).join(' · ')), write, error);
+      return row;
+    }, 'Подходящих контактов нет.'));
+  };
+  search.input.addEventListener('input', updateResults);
+  group.addEventListener('change', updateResults);
+  updateResults();
+  const body = element('div', 'cabinet-layout');
+  body.append(controls);
+  if (!groups.length) body.append(element('p', 'muted', 'Преподавателю пока не назначены учебные группы.'));
+  body.append(results);
+  return panel('Студенты и деканат', body);
+}
+
+function renderTeacherJournalIndex({ lessons, recent }) {
+  const choose = panel('Журнал занятий', listFor(lessons, (lesson) => {
+    const link = anchor('#grades/journal-' + lesson.id, 'inline-link', lesson.title + ' · ' + lesson.group);
+    const row = element('div', 'cabinet-layout');
+    row.append(link, metadata([
+      ['Занятие', eventTime(lesson.date) + ', ' + lessonTimes(lesson)],
+      ['Черновик', lesson.draftCount ? 'Заполнено строк: ' + lesson.draftCount : '—'],
+    ]));
+    return row;
+  }, 'Назначенных занятий пока нет.'));
+  const history = panel('Недавние изменения', listFor(recent, (publication) => {
+    const { id, title, group, publishedAt, count, canUndo, expiredCount, blockedCount } = publication;
+    const details = element('details', 'record-details');
+    details.append(element('summary', 'record-summary', title + ' · ' + group + ' · ' + eventTime(publishedAt)));
+    const output = teacherError();
+    const content = element('div', 'cabinet-layout');
+    const undo = element('details', 'record-details');
+    const undoLabel = element('summary', 'record-summary', 'Отменить публикацию');
+    undo.append(undoLabel, element('p', 'muted', 'Предмет: ' + title + '. Группа: ' + group + '. Оценок: ' + count + '.'));
+    if (canUndo) {
+      const confirm = actionButton('Подтвердить отмену публикации', async () => {
+        confirm.disabled = true;
+        output.textContent = '';
+        try {
+          await post(resource('/api/teacher/publications', id, '/undo'), {});
+          if (window.location.hash === '#grades') loadTeacherView('grades');
+        } catch (error) {
+          teacherFeedback(output, error);
+        } finally {
+          confirm.disabled = false;
+        }
+      }, true);
+      undo.append(confirm);
+    } else {
+      undo.append(element('p', 'muted', expiredCount
+        ? 'Срок исправления истёк для части оценок. Доступные оценки можно исправить по одной.'
+        : blockedCount ? 'Публикация изменилась. Доступные оценки можно исправить по одной.' : 'Отмена публикации недоступна.'));
+    }
+    content.append(element('p', 'muted', publication.work + ' · максимум ' + publication.maxPoints),
+      listFor(publication.rows ?? [], (row) => {
+        const entry = element('div', 'cabinet-layout');
+        entry.append(element('strong', '', row.name), teacherScoreHistory(row));
+        return entry;
+      }, 'Оценок в публикации нет.'),
+      anchor('#grades/journal-' + publication.lessonId, 'inline-link', 'Открыть журнал и оценки'), undo, output);
+    details.append(content);
+    return details;
+  }, 'Публикаций пока нет.'));
+  const legacy = element('div', 'cabinet-layout');
+  legacy.id = 'teacher-enrollment-grades';
+  if (cabinet) legacy.append(...renderGrades(cabinet.grades));
+  return [choose, history, legacy];
+}
+
+function teacherScoreHistory(row) {
+  const details = element('details', 'record-details');
+  details.append(element('summary', 'record-summary', 'История оценки'));
+  const score = (points) => points == null ? '—' : pointsFormat.format(points);
+  const actions = {
+    publish: 'Опубликовано', change: 'Изменено', delete: 'Удалено',
+    restore: 'Восстановлено', undo: 'Публикация отменена', unpublish: 'Публикация отменена',
+  };
+  details.append(listFor(row.history ?? [], (event) => element('p', 'muted',
+    [eventTime(event.at), event.author, actions[event.action] ?? event.action, score(event.before) + ' → ' + score(event.after)].join(' · ')),
+  'Изменений пока нет.'));
+  return details;
+}
+
+function renderTeacherJournal({ lesson, work, maxPoints, rows }) {
+  const wrapper = element('div', 'cabinet-layout');
+  const meta = metadata([
+    ['Предмет', lesson.title], ['Группа', lesson.group], ['Занятие', eventTime(lesson.date) + ' · ' + lessonTimes(lesson)],
+    ['Работа', work], ['Максимальный балл', maxPoints],
+  ]);
+  const form = element('form', 'cabinet-form teacher-journal');
+  const account = profile;
+  const hash = location.hash;
+  const error = teacherError();
+  const summary = element('p', 'muted');
+  summary.setAttribute('aria-live', 'polite');
+  const publish = element('button', 'button button-primary', 'Опубликовать заполненные строки');
+  publish.type = 'submit';
+  let publicationKey = crypto.randomUUID();
+  let publishing = false;
+  const entries = [];
+  const current = () => profile === account && location.hash === hash;
+  const pointValue = (input) => input.value === '' ? null : input.valueAsNumber;
+  const valid = (input) => input.validity.valid && !input.validity.badInput;
+  const rangeError = 'Введите балл от 0 до ' + maxPoints + '.';
+  const refreshSummary = () => {
+    const filled = entries.filter(({ input }) => !input.disabled && valid(input) && pointValue(input) !== null).length;
+    const unfinished = entries.filter(({ input }) => !input.disabled && valid(input) && pointValue(input) === null).length;
+    summary.textContent = 'Заполнено для публикации: ' + filled + '. Ещё предстоит оценить: ' + unfinished + '.';
+    publish.disabled = publishing || !filled || entries.some(({ input }) => !input.disabled && !valid(input));
+  };
+  const makePointsField = (row, value) => {
+    const points = teacherField('Балл — ' + row.name, 'number', value ?? '');
+    points.input.min = '0';
+    points.input.max = String(maxPoints);
+    points.input.step = 'any';
+    points.input.inputMode = 'decimal';
+    points.input.setAttribute('enterkeyhint', 'next');
+    return points;
+  };
+  const grid = listFor(rows, (row) => {
+    const card = element('article', 'teacher-score-row');
+    const posted = row.firstPublishedAt != null && row.points != null && !row.deleted;
+    const locked = row.firstPublishedAt != null && !row.canEdit;
+    const { field, input } = makePointsField(row, row.draft);
+    const output = teacherError();
+    const status = element('p', 'muted');
+    status.setAttribute('role', 'status');
+    input.disabled = posted || locked || Boolean(row.deleted);
+    let saved = row.draft ?? null;
+    let pending;
+    let cachedError = false;
+    const retry = actionButton('Повторить сохранение', () => void save());
+    retry.hidden = true;
+    const save = () => {
+      if (pending || input.disabled) return pending;
+      if (!valid(input)) {
+        output.textContent = rangeError;
+        return;
+      }
+      if (pointValue(input) === saved && !cachedError) return;
+      pending = (async () => {
+        do {
+          const points = pointValue(input);
+          try {
+            await post(resource('/api/teacher/journal', lesson.id, '/draft'), { studentId: row.studentId, points });
+            saved = points;
+            output.textContent = valid(input) ? '' : rangeError;
+            status.textContent = points === null ? 'Не оценено' : 'Черновик сохранён';
+            cachedError = false;
+            retry.hidden = true;
+          } catch (failure) {
+            cachedError = true;
+            retry.hidden = false;
+            if (profile === account) teacherFeedback(output, failure);
+          }
+        } while (profile === account && !cachedError && valid(input) && pointValue(input) !== saved);
+      })().finally(() => { pending = undefined; });
+      return pending;
+    };
+    const entry = { input, save, get saved() { return !cachedError && pointValue(input) === saved; } };
+    entries.push(entry);
+    input.addEventListener('input', () => {
+      output.textContent = '';
+      if (!valid(input)) output.textContent = rangeError;
+      else void save();
+      refreshSummary();
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' || event.isComposing) return;
+      event.preventDefault();
+      entries.slice(entries.indexOf(entry) + 1).find(({ input: next }) => !next.disabled)?.input.focus();
+    });
+    status.textContent = posted ? 'Опубликовано: ' + pointsFormat.format(row.points)
+      : row.deleted ? 'Балл удалён' : row.draft == null ? 'Не оценено' : 'Черновик сохранён';
+    card.append(element('h3', '', row.name), status);
+    if (!input.disabled) card.append(field, retry, output);
+    if (row.editableUntil) {
+      const expiry = new Date(row.editableUntil).toLocaleString('ru-RU', {
+        dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Moscow',
+      });
+      card.append(element('p', 'muted', (locked ? 'Срок исправления истёк: ' : 'Исправить до: ') + expiry + ' МСК'));
+      if (locked) card.append(element('p', 'muted', 'Для исправления после срока свяжитесь с деканатом.'), anchor('#contacts', 'inline-link', 'Контакты деканата'));
+      else if (posted || row.deleted) {
+        const actions = element('div', 'teacher-toolbar');
+        const actionError = teacherError();
+        async function change(action, points) {
+          try {
+            await post(resource('/api/teacher/journal', lesson.id, '/score'), { studentId: row.studentId, action, points });
+            if (current()) loadTeacherView('grades', 'journal-' + lesson.id);
+          } catch (failure) {
+            if (current()) {
+              teacherFeedback(actionError, failure);
+              if (failure.status === 409 && failure.message.includes('24 часа')) {
+                actions.replaceChildren(anchor('#contacts', 'inline-link', 'Контакты деканата'));
+              }
+            }
+          }
+        }
+        if (row.deleted) actions.append(actionButton('Восстановить', () => change('restore')));
+        else {
+          const edit = makePointsField(row, row.points);
+          actions.append(edit.field, actionButton('Сохранить исправление', () => {
+            if (!edit.input.reportValidity() || pointValue(edit.input) === null) return;
+            change('change', pointValue(edit.input));
+          }), actionButton('Удалить балл', () => change('delete')));
+        }
+        card.append(actions, actionError);
+      }
+      card.append(teacherScoreHistory(row));
+    }
+    return card;
+  }, 'В группе пока нет студентов.');
+  form.append(grid, summary, publish, error);
+  refreshSummary();
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (publish.disabled) return;
+    publishing = true;
+    refreshSummary();
+    error.textContent = '';
+    try {
+      const editable = entries.filter(({ input }) => !input.disabled);
+      await Promise.all(editable.map(({ save }) => save()));
+      if (!current()) return;
+      if (editable.some(({ saved }) => !saved)) throw new Error('Сохраните черновик во всех заполненных строках перед публикацией.');
+      await post(resource('/api/teacher/journal', lesson.id, '/publish'), { clientId: publicationKey });
+      publicationKey = crypto.randomUUID();
+      if (current()) loadTeacherView('grades', 'journal-' + lesson.id);
+    } catch (failure) {
+      if (current()) teacherFeedback(error, failure);
+    } finally {
+      publishing = false;
+      refreshSummary();
+    }
+  });
+  wrapper.append(anchor('#grades', 'inline-link', 'К списку занятий и изменениям'), meta, form);
+  return panel('Выставить баллы', wrapper);
 }
 
 function renderDialogueContact(item) {
@@ -2664,7 +3103,9 @@ function renderDialogueMessages(messages, content) {
       if (receipt) label.append(receipt);
       const actions = messageActions(item);
       label.append(actions);
-      message.append(element('p', 'record-copy', item.text), label);
+      if (item.text) message.append(element('p', 'record-copy', item.text));
+      if (item.attachments?.length) message.append(renderMessageAttachments(item.attachments));
+      message.append(label);
       row.append(message);
       entry = { row, receipt, deleteForAll: actions.querySelector('[data-scope="all"]') };
       renderedMessages.set(item.id, entry);
@@ -2700,7 +3141,10 @@ function renderDialogueMessages(messages, content) {
     receipt.setAttribute('role', 'img');
     receipt.setAttribute('aria-label', status);
     receipt.title = status;
-    if (!saved) message.append(element('p', 'record-copy', state.outgoing.text));
+    if (!saved) {
+      if (state.outgoing.text) message.append(element('p', 'record-copy', state.outgoing.text));
+      for (const file of state.outgoingFiles ?? []) message.append(element('p', 'record-copy', file.name));
+    }
     message.append(receipt);
     if (!state.sending) {
       const retry = element('button', 'button button-secondary', 'Повторить');
@@ -2815,15 +3259,105 @@ function renderUpdates(updates) {
   }, 'Уведомлений пока нет.'))];
 }
 
+function messageFileSize(bytes) {
+  return bytes < 1024 * 1024
+    ? pointsFormat.format(Math.max(1, Math.round(bytes / 1024))) + ' КБ'
+    : pointsFormat.format(Math.round(bytes / 1024 / 102.4) / 10) + ' МБ';
+}
+
+function renderMessageAttachments(files) {
+  return listFor(files, (file) => {
+    const item = element('div', 'message-attachment');
+    if (file.previewUrl) {
+      const preview = element('img');
+      preview.src = file.previewUrl;
+      preview.alt = file.filename;
+      preview.loading = 'lazy';
+      item.append(preview);
+    }
+    const download = anchor(file.url, 'inline-link', 'Скачать');
+    download.setAttribute('aria-label', 'Скачать ' + file.filename);
+    item.append(element('strong', '', file.filename), element('span', 'muted', messageFileSize(file.size)), download);
+    return item;
+  });
+}
+
+function syncMessageFiles(state) {
+  const list = byId('message-files');
+  const files = state?.files ?? [];
+  const locked = Boolean(state?.outgoing);
+  renderSection('message-files', [files.map(({ name, size, lastModified }) => [name, size, lastModified]), locked, selectedDialogue], () =>
+    files.map((file, index) => {
+      const item = element('div', 'message-file');
+      const remove = actionButton('Убрать', () => {
+        state.files.splice(index, 1);
+        state.error = '';
+        syncComposer();
+        byId('message-attach').focus({ preventScroll: true });
+      });
+      remove.disabled = locked;
+      remove.setAttribute('aria-label', 'Убрать ' + file.name);
+      item.append(element('span', '', file.name + ' · ' + messageFileSize(file.size)), remove);
+      return item;
+    }));
+  list.hidden = !files.length;
+  byId('message-attach').disabled = locked;
+  const progress = byId('message-upload');
+  progress.hidden = !state?.sending || !state.outgoingFiles?.length;
+  if (state?.uploadProgress == null) progress.removeAttribute('value');
+  else progress.value = state.uploadProgress;
+}
+
+function selectMessageFiles(event) {
+  const state = messageStates.get(selectedDialogue) ?? {};
+  if (selectedDialogue === undefined || state.outgoing) return;
+  const files = [...(state.files ?? []), ...event.target.files];
+  event.target.value = '';
+  messageStates.set(selectedDialogue, state);
+  if (files.length > 5 || files.reduce((bytes, file) => bytes + file.size, 0) > 10 * 1024 ** 2) {
+    state.error = 'Можно прикрепить до пяти файлов общим размером до 10 МБ.';
+  } else if (files.some((file) => !file.size || !/\.(?:pdf|docx|jpe?g|png)$/i.test(file.name))) {
+    state.error = 'Поддерживаются непустые файлы PDF, DOCX, JPG и PNG.';
+  } else {
+    state.files = files;
+    state.error = '';
+  }
+  syncComposer();
+}
+
+function uploadMessage(path, state, current) {
+  const data = new FormData();
+  data.append('text', state.outgoing.text);
+  data.append('clientId', state.outgoing.clientId);
+  for (const file of state.outgoingFiles) data.append('files', file);
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', path);
+    xhr.responseType = 'json';
+    xhr.upload.addEventListener('progress', (event) => {
+      if (!event.lengthComputable) return;
+      state.uploadProgress = event.loaded * 100 / event.total;
+      if (current()) byId('message-upload').value = state.uploadProgress;
+    });
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else reject(Object.assign(new Error(xhr.response?.error || 'Файл не отправлен.'), { status: xhr.status }));
+    });
+    xhr.addEventListener('error', () => reject(new Error('Соединение прервано. Повторите отправку.')));
+    xhr.send(data);
+  });
+}
+
 function syncComposer() {
   const state = messageStates.get(selectedDialogue);
   const value = state?.text ?? '';
   if (messageText.value !== value) messageText.value = value;
   const button = byId('message-submit');
-  button.disabled = Boolean(state?.outgoing) || !value.trim();
+  button.disabled = Boolean(state?.outgoing) || (!value.trim() && !state?.files?.length);
   messageText.style.height = 'auto';
   messageText.style.height = Math.min(120, messageText.scrollHeight) + 'px';
   byId('message-error').textContent = state?.error ?? '';
+  syncMessageFiles(state);
   if (state?.sending) messageForm.setAttribute('aria-busy', 'true');
   else messageForm.removeAttribute('aria-busy');
 }
@@ -2838,7 +3372,8 @@ function updateDraft() {
 function handleMessageKey(event) {
   if (event.key !== 'Enter' || event.shiftKey || event.isComposing || composingMessage || event.keyCode === 229) return;
   event.preventDefault();
-  if (messageText.value.trim() && !messageStates.get(selectedDialogue)?.outgoing) messageForm.requestSubmit();
+  const state = messageStates.get(selectedDialogue);
+  if ((messageText.value.trim() || state?.files?.length) && !state?.outgoing) messageForm.requestSubmit();
 }
 
 async function sendMessage(event, retry = false) {
@@ -2848,24 +3383,29 @@ async function sendMessage(event, retry = false) {
   const draft = messageText.value;
   const state = messageStates.get(id) ?? {};
   if (!account || signingOut || id === undefined || activeView !== 'messages' || composingMessage || state.sending) return;
-  if (retry ? !state.outgoing : state.outgoing || !draft.trim()) return;
+  if (retry ? !state.outgoing : state.outgoing || (!draft.trim() && !state.files?.length)) return;
   if (!retry) {
     state.text = draft;
     state.outgoing = { text: draft.trim(), clientId: crypto.randomUUID() };
     state.outgoingDraft = draft;
+    state.outgoingFiles = state.files?.slice();
   }
   const current = () => profile === account && selectedDialogue === id && activeView === 'messages';
   state.error = '';
   state.sending = true;
+  state.uploadProgress = undefined;
   messageStates.set(id, state);
   syncComposer();
   renderDialogueMessages(receivedMessages, byId('messages-content'));
   scrollConversationEnd();
   try {
-    await post(resource('/api/dialogues', id, '/messages'), state.outgoing);
+    const path = resource('/api/dialogues', id, '/messages');
+    if (state.outgoingFiles?.length) await uploadMessage(path, state, current);
+    else await post(path, state.outgoing);
     if (profile !== account) return;
     if (state.text === state.outgoingDraft) state.text = '';
     state.outgoing = undefined;
+    state.files = state.outgoingFiles = undefined;
     if (current()) {
       setNewDialogueMode(false);
       await refreshDialogue(false, true);
@@ -2877,8 +3417,12 @@ async function sendMessage(event, retry = false) {
       if (error.status === 410) {
         if (state.text === state.outgoingDraft) state.text = '';
         state.outgoing = undefined;
+        state.files = state.outgoingFiles = undefined;
         state.error = error.message;
         if (current()) void refreshDialogue(true, true);
+      } else if (state.outgoingFiles?.length && [400, 413, 415, 422].includes(error.status)) {
+        state.outgoing = state.outgoingFiles = undefined;
+        state.error = error.message;
       } else {
         state.error = 'Не удалось подтвердить отправку.';
       }
@@ -3002,6 +3546,8 @@ byId('messages-content').addEventListener('scroll', () => {
 });
 document.addEventListener('visibilitychange', acknowledgeMessages);
 messageForm.addEventListener('submit', sendMessage);
+byId('message-attach').addEventListener('click', () => byId('message-file-input').click());
+byId('message-file-input').addEventListener('change', selectMessageFiles);
 byId('message-submit').addEventListener('pointerdown', (event) => {
   if (mobileMessenger.matches && document.activeElement === messageText) event.preventDefault();
 });

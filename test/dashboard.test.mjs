@@ -132,6 +132,7 @@ test('composer handles Enter, Shift, IME and duplicate submissions', async () =>
     emojiOptions: {}, emojiToggle: { setAttribute() {} },
     crypto: { randomUUID: () => 'retry-token' }, receivedMessages: [],
     renderDialogueMessages() {}, scrollConversationEnd() {},
+    syncMessageFiles() {},
   });
   const enter = (flags = {}) => {
     let prevented = false;

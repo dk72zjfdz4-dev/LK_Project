@@ -103,7 +103,7 @@ export function migratePortfolio(db) {
   `);
 }
 
-function isPng(contents) {
+export function isPng(contents) {
   const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   if (!contents.subarray(0, 8).equals(signature)) return false;
   let hasImageData = false;
@@ -124,7 +124,7 @@ function isPng(contents) {
   return false;
 }
 
-function isJpeg(contents) {
+export function isJpeg(contents) {
   if (contents.length < 4 || contents.readUInt16BE(0) !== 0xffd8
       || contents.readUInt16BE(contents.length - 2) !== 0xffd9) return false;
   let offset = 2;

@@ -106,6 +106,21 @@ POST в таблице данных кабинета и POST для избран
 
 Аутентифицированный `GET /api/library` отдаёт демонстрационный каталог `{books:[{id,title,author,subject,description,favorite}]}`. Поиск по названию и автору и фильтр дисциплины применяются к этому общему каталогу на клиенте. `POST /api/library/:id/favorite` принимает `{favorite:boolean}`. Владелец избранного определяется сессией. Установка и снятие отметки идемпотентны.
 
+## Расписание, журнал и контакты преподавателя
+
+- `GET /api/teacher/schedule?week=YYYY-MM-DD` возвращает `{today,weekStart,lessons}`. Занятие содержит `id,date,start,end,title,group,room,status,originalDate,originalStart,originalEnd,comment`. Статусы: `scheduled`, `moved`, `cancelled`. Идентификатор вида `<lessonId>-<originalDate>` сохраняется при переносе.
+- `POST /api/teacher/lessons/:id/change` принимает `{action:"move",date,start,end,room,comment}` или `{action:"cancel",comment}` и возвращает `{lesson}`. Сервер проверяет назначение и конфликты. В расписании студента сохраняются те же поля изменения и совместимые `change` и `cancelled`.
+- `GET /api/teacher/journal` возвращает `{lessons,recent}` с количеством черновиков по занятиям и историей публикаций. `GET /api/teacher/journal/:id` возвращает `{lesson,work,maxPoints,rows}`. Строка содержит `studentId,name,draft,points,deleted,firstPublishedAt,editableUntil,canEdit,history`.
+- `POST /api/teacher/journal/:id/draft` принимает `{studentId,points}`. Число 0 сохраняется, `null` очищает черновик. `POST /api/teacher/journal/:id/publish` принимает `{clientId}` и возвращает `{publicationId}`. Повтор с тем же ключом возвращает прежний результат. В кабинете студента `grades[].lessonScores` содержит только опубликованные оценки этого студента.
+- `POST /api/teacher/journal/:id/score` принимает `{studentId,action,points?}` с `change`, `delete` или `restore`. `POST /api/teacher/publications/:id/undo` с `{}` возвращает баллы одной публикации в черновик атомарно. Оба маршрута проверяют первоначальный 24-часовой срок.
+- `GET /api/teacher/contacts` возвращает `{groups,contacts}`, где контакт содержит `id,partnerId,name,role,roleLabel,group,department`. `POST /api/teacher/contacts/:id/dialogue` с `{}` возвращает `{dialogueId}` после проверки области доступа.
+
+## Вложения сообщений
+
+`POST /api/dialogues/:id/messages` по-прежнему принимает JSON для текста. Для файлов используется `multipart/form-data` с `clientId`, необязательным `text` и одним или несколькими полями `files`. Разрешены PDF, DOCX, JPG и PNG, до пяти файлов и 10 МБ суммарно. Идемпотентный повтор требует те же данные.
+
+В истории сообщений поле `attachments` содержит элементы `{id,filename,mediaType,size,url,previewUrl?}`. `GET /api/dialogues/:id/attachments/:attachmentId` проверяет участие в диалоге и видимость сообщения. `?preview=1` доступен для JPG и PNG.
+
 ## Запланированные изменения API
 
 На следующий этап новые маршруты и изменения форматов не согласованы. Размещение с HTTPS не добавляет маршруты.

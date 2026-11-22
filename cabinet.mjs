@@ -1,11 +1,19 @@
+import { createHash } from 'node:crypto';
 import { crc32, inflateRawSync } from 'node:zlib';
 import { certificatePdf, certificatePrint } from './certificate.mjs';
 import { answerFor, documents, faqFor } from './knowledge.mjs';
-import { createPortfolio, migratePortfolio } from './portfolio.mjs';
+import { createPortfolio, isJpeg, isPng, migratePortfolio } from './portfolio.mjs';
 
 const PDF = 'application/pdf';
 const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const maxUpload = 10 * 1024 * 1024;
+const maxMessageFiles = 5;
+const messageFileTypes = [
+  { extension: /\.pdf$/i, mediaType: PDF, validate: isPdf },
+  { extension: /\.docx$/i, mediaType: DOCX, validate: isDocx },
+  { extension: /\.jpe?g$/i, mediaType: 'image/jpeg', validate: isJpeg },
+  { extension: /\.png$/i, mediaType: 'image/png', validate: isPng },
+];
 const currentSemester = 2;
 const practiceReportTitle = 'Отчёт по практикуму';
 const practiceReportDescription = 'Сопоставьте ожидаемый и фактический результаты и объясните расхождения.';
@@ -180,6 +188,16 @@ export function installCabinet(db) {
       lesson_id INTEGER PRIMARY KEY REFERENCES lessons(id) ON DELETE CASCADE,
       parity INTEGER NOT NULL CHECK (parity IN (0, 1))
     ) STRICT;
+    CREATE TABLE IF NOT EXISTS message_attachments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+      filename TEXT NOT NULL,
+      media_type TEXT NOT NULL,
+      checksum TEXT NOT NULL,
+      size INTEGER NOT NULL CHECK (size BETWEEN 1 AND 10485760),
+      contents BLOB NOT NULL CHECK (length(contents) = size)
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS message_attachments_message ON message_attachments(message_id, id);
   `);
   if (!db.prepare("SELECT 1 FROM pragma_table_info('students') WHERE name = 'directory_only'").get()) {
     db.exec('ALTER TABLE students ADD COLUMN directory_only INTEGER NOT NULL DEFAULT 0 CHECK (directory_only IN (0, 1))');
@@ -619,10 +637,10 @@ function isDocx(contents) {
   }
 }
 
-function filenameHeader(filename) {
+function filenameHeader(filename, disposition = 'attachment') {
   const encoded = encodeURIComponent(filename).replace(/[!'()*]/g,
     (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
-  return `attachment; filename*=UTF-8''${encoded}`;
+  return `${disposition}; filename*=UTF-8''${encoded}`;
 }
 
 const searchSections = [
@@ -644,7 +662,7 @@ function searchWords(value) {
   return value.normalize('NFC').toLowerCase().replaceAll('ё', 'е').match(/[\p{L}\p{N}]+/gu) ?? [];
 }
 
-export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody, json }) {
+export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody, json, projectGrades = (rows) => rows }) {
   const prepare = (sql) => db.prepare(sql);
   const grades = prepare(`
     SELECT e.id, subject, semester,
@@ -693,7 +711,9 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
       CASE partner.role WHEN 'dean' THEN 'Деканат' WHEN 'teacher' THEN 'Преподаватель'
         ELSE 'Студент' END AS roleLabel,
       partner.faculty, partner.program, partner.student_group AS studentGroup, partner.year,
-      last.text AS lastText, last.sender_id = :viewerId AS lastMine, last.created_at AS lastAt,
+      COALESCE(NULLIF(last.text, ''), (
+        SELECT filename FROM message_attachments WHERE message_id = last.id ORDER BY id LIMIT 1
+      )) AS lastText, last.sender_id = :viewerId AS lastMine, last.created_at AS lastAt,
       (SELECT COUNT(*) FROM messages m WHERE m.dialogue_id = d.id AND m.sender_id <> :viewerId
         AND m.is_read = 0 AND ${messageVisibility}) AS unreadCount
     FROM dialogues d
@@ -751,7 +771,10 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
   const messageFields = `
     SELECT m.id, m.sender_id = :viewerId AS mine, sender.full_name AS sender, m.text, m.created_at AS createdAt,
       m.is_delivered AS delivered, m.is_read AS read,
-      CASE WHEN m.sender_id = :viewerId THEN m.client_id END AS clientId
+      CASE WHEN m.sender_id = :viewerId THEN m.client_id END AS clientId,
+      (SELECT json_group_array(json_object(
+        'id', a.id, 'filename', a.filename, 'mediaType', a.media_type, 'size', a.size, 'checksum', a.checksum
+      ) ORDER BY a.id) FROM message_attachments a WHERE a.message_id = m.id) AS attachmentData
     FROM messages m JOIN students sender ON sender.id = m.sender_id
     WHERE m.dialogue_id = :dialogueId AND ${messageVisibility}
   `;
@@ -768,6 +791,15 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     INSERT INTO messages (dialogue_id, sender_id, text, created_at, client_id) VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(dialogue_id, sender_id, client_id) DO NOTHING RETURNING id
   `);
+  const insertMessageAttachment = prepare(`
+    INSERT INTO message_attachments (message_id, filename, media_type, checksum, size, contents) VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const messageAttachment = prepare(`
+    SELECT a.filename, a.media_type, a.contents FROM message_attachments a
+    JOIN messages m ON m.id = a.message_id
+    WHERE m.dialogue_id = :dialogueId AND a.id = :attachmentId AND ${messageVisibility}
+  `);
+  const removeMessageAttachments = prepare('DELETE FROM message_attachments WHERE message_id = ?');
   const messageForDeletion = prepare(`
     SELECT sender_id, deleted_for_all FROM messages WHERE dialogue_id = ? AND id = ?
   `);
@@ -927,7 +959,7 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
         ...(dialogue.partnerRole === 'student' && { studentProfile: { faculty, program, group: studentGroup, year } }),
       }));
     return {
-      grades: role === 'dean' ? [] : grades.all(id, role, id, role),
+      grades: role === 'dean' ? [] : projectGrades(grades.all(id, role, id, role)),
       requests: role === 'teacher' ? [] : requests.all(id, role)
         .map((row) => ({ ...row, history: requestHistory.all(row.id) })),
       dialogues: conversations,
@@ -1054,17 +1086,22 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     found(dialogueById.get(id, viewer.id, viewer.id), 'Диалог не найден.');
   }
 
-  function messageView({ mine, delivered, read, clientId, ...message }) {
+  function messageView({ mine, delivered, read, clientId, attachmentData, ...message }, dialogueId) {
+    const attachments = JSON.parse(attachmentData).map(({ id, filename, mediaType, size }) => {
+      const url = `/api/dialogues/${dialogueId}/attachments/${id}`;
+      return { id, filename, mediaType, size, url, ...(mediaType.startsWith('image/') && { previewUrl: url + '?preview=1' }) };
+    });
     return {
       ...message, mine: Boolean(mine), delivered: Boolean(delivered), read: Boolean(read),
       ...(clientId === null ? {} : { clientId }),
+      ...(attachments.length && { attachments }),
     };
   }
 
   function dialogueMessages(viewer, id) {
     ownedDialogue(viewer, id);
     return {
-      messages: messages.all({ viewerId: viewer.id, dialogueId: id }).map(messageView),
+      messages: messages.all({ viewerId: viewer.id, dialogueId: id }).map((message) => messageView(message, id)),
     };
   }
 
@@ -1089,20 +1126,84 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     markReceipts(viewer, id, messageIds, 1);
   }
 
-  function writeMessage(viewer, id, { text: input, clientId }) {
+  async function parseMessage(request, viewer, id) {
     ownedDialogue(viewer, id);
-    const content = text(input, 'Введите сообщение', 2000);
+    const type = request.headers['content-type'];
+    if (type?.split(';', 1)[0].trim().toLowerCase() !== 'multipart/form-data') {
+      const data = await jsonBody(request, 16 * 1024);
+      if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
+      return { text: data.text, clientId: data.clientId };
+    }
+    const contents = await bytesBody(request, maxUpload + 64 * 1024);
+    let form;
+    try {
+      form = await new Request('http://localhost', {
+        method: 'POST', headers: { 'Content-Type': type }, body: contents,
+      }).formData();
+    } catch {
+      throw new HttpError(400, 'Не удалось прочитать вложения.');
+    }
+    const uploads = form.getAll('files');
+    if (form.getAll('text').length > 1 || form.getAll('clientId').length !== 1
+      || !uploads.length || uploads.length > maxMessageFiles
+      || uploads.some((file) => !(file instanceof File))) {
+      throw new HttpError(400, 'Укажите идентификатор отправки и прикрепите до пяти файлов.');
+    }
+    if (uploads.reduce((total, file) => total + file.size, 0) > maxUpload) {
+      throw new HttpError(413, 'Вложения должны занимать не более 10 МБ вместе.');
+    }
+    const files = [];
+    for (const file of uploads) {
+      const filename = file.name.trim();
+      // eslint-disable-next-line no-control-regex -- Reject control characters in uploaded filenames.
+      if (!filename || filename.length > 180 || /[\u0000-\u001f\u007f/\\]/.test(file.name)) {
+        throw new HttpError(400, 'Проверьте имя файла.');
+      }
+      const type = messageFileTypes.find(({ extension }) => extension.test(filename));
+      if (!type || (file.type && file.type !== 'application/octet-stream' && type.mediaType !== file.type)) {
+        throw new HttpError(415, 'Прикрепите файл PDF, DOCX, JPG или PNG.');
+      }
+      const contents = Buffer.from(await file.arrayBuffer());
+      if (!type.validate(contents)) {
+        throw new HttpError(415, 'Содержимое файла не соответствует расширению.');
+      }
+      const checksum = createHash('sha256').update(contents).digest('hex');
+      files.push({ filename, mediaType: type.mediaType, size: file.size, contents, checksum });
+    }
+    return { text: form.get('text') ?? undefined, clientId: form.get('clientId'), attachmentFiles: files };
+  }
+
+  function writeMessage(viewer, id, { text: input, clientId, attachmentFiles }) {
+    ownedDialogue(viewer, id);
+    const files = attachmentFiles ?? [];
+    const content = text(input, 'Введите сообщение', 2000, !files.length);
     if (clientId !== undefined && (typeof clientId !== 'string' || !clientId.trim() || clientId.length > 128)) {
       throw new HttpError(400, 'Недопустимый идентификатор отправки.');
     }
     const lookup = { viewerId: viewer.id, dialogueId: id };
     const inserted = sendMessage.get(id, viewer.id, content, now(), clientId ?? null);
+    if (inserted) {
+      for (const file of files) {
+        insertMessageAttachment.run(inserted.id, file.filename, file.mediaType, file.checksum, file.size, file.contents);
+      }
+    }
     const message = inserted
       ? writtenMessage.get({ ...lookup, messageId: inserted.id })
       : sentWithClientId.get({ ...lookup, clientId });
     if (!message) throw new HttpError(410, 'Сообщение удалено.');
-    if (message.text !== content) throw new HttpError(409, 'Идентификатор отправки уже использован.');
-    return { message: messageView(message) };
+    const stored = JSON.parse(message.attachmentData);
+    if (message.text !== content || stored.length !== files.length
+      || stored.some((file, index) => ['filename', 'mediaType', 'size', 'checksum'].some((key) => file[key] !== files[index][key]))) {
+      throw new HttpError(409, 'Идентификатор отправки уже использован.');
+    }
+    return { message: messageView(message, id) };
+  }
+
+  function downloadMessageAttachment(viewer, id, query, attachmentId) {
+    ownedDialogue(viewer, id);
+    const file = found(messageAttachment.get({ dialogueId: id, viewerId: viewer.id, attachmentId }), 'Вложение не найдено.');
+    const inline = query.get('preview') === '1' && file.media_type.startsWith('image/');
+    return { ...file, inline, sameOrigin: true };
   }
 
   function deleteMessage(viewer, dialogueId, { scope }, messageId) {
@@ -1117,6 +1218,8 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
       hideMessage.run(messageId, viewer.id);
     } else if (!deleteMessageForAll.run(dialogueId, messageId, viewer.id).changes) {
       throw new HttpError(409, 'Получатель уже прочитал сообщение.');
+    } else {
+      removeMessageAttachments.run(messageId);
     }
   }
 
@@ -1242,7 +1345,8 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     { method: 'POST', path: /^\/api\/dialogues\/contact\/([^/]+)$/, action: openDirectoryDialogue },
     { method: 'POST', path: /^\/api\/dialogues\/([^/]+)\/delivered$/, action: deliverMessages },
     { method: 'POST', path: /^\/api\/dialogues\/([^/]+)\/read$/, action: readDialogue },
-    { method: 'POST', path: /^\/api\/dialogues\/([^/]+)\/messages$/, action: writeMessage },
+    { method: 'POST', path: /^\/api\/dialogues\/([^/]+)\/messages$/, parse: parseMessage, action: writeMessage },
+    { method: 'GET', path: /^\/api\/dialogues\/([^/]+)\/attachments\/([^/]+)$/, query: true, download: true, action: downloadMessageAttachment },
     { method: 'POST', path: /^\/api\/dialogues\/([^/]+)\/messages\/([^/]+)\/delete$/, action: deleteMessage },
     { method: 'POST', path: /^\/api\/assignments$/, role: 'teacher', action: assignWork },
     { method: 'POST', path: /^\/api\/assignments\/([^/]+)\/submission$/, role: 'student', parse: upload, action: submitWork },
@@ -1282,7 +1386,7 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
       return json(response, 200, { ok: true, ...result });
     }
     const query = route.query ? new URL(request.url, 'http://localhost').searchParams : undefined;
-    const result = await route.action(viewer, id, query);
+    const result = await route.action(viewer, id, query, relatedId);
     if (route.print) {
       response.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
@@ -1293,8 +1397,9 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     if (!route.download) return json(response, 200, result);
     response.writeHead(200, {
       'Content-Type': result.media_type,
-      'Content-Disposition': filenameHeader(result.filename),
+      'Content-Disposition': filenameHeader(result.filename, result.inline ? 'inline' : 'attachment'),
       'Content-Length': result.contents.length,
+      ...(result.sameOrigin && { 'Cross-Origin-Resource-Policy': 'same-origin' }),
     });
     response.end(result.contents);
   }
@@ -1305,5 +1410,5 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     return answerFor(role, query);
   }
 
-  return { match, handle, search, help, lessonContact };
+  return { match, handle, search, help, lessonContact, openDirectoryDialogue };
 }

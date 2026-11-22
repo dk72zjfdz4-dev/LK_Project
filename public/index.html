@@ -255,6 +255,7 @@
         </section>
 
         <section class="view" id="view-schedule" aria-label="Расписание занятий" hidden>
+          <div class="cabinet-layout" id="teacher-schedule" hidden></div>
           <div class="schedule-status" id="week-status">
             <p role="status" data-status></p>
             <button type="button" class="button button-secondary" data-schedule-retry hidden>Повторить</button>
@@ -371,13 +372,20 @@
                 <button class="button button-secondary" id="messages-new" type="button" hidden>Новые сообщения <span aria-hidden="true">↓</span></button>
               </div>
               <form class="cabinet-form message-form" id="message-form" hidden>
+                <div id="message-files" class="message-files" hidden></div>
+                <progress id="message-upload" max="100" aria-label="Загрузка вложений" hidden></progress>
                 <div class="message-input-row">
                   <span class="icon-control">
                     <button class="button button-secondary icon-button" id="emoji-toggle" type="button" aria-label="Эмодзи" aria-expanded="false" aria-controls="emoji-options"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 14c.8 1.2 2.2 2 4 2s3.2-.8 4-2M9 9h.01M15 9h.01"/></svg></button>
                     <span class="icon-tooltip" aria-hidden="true">Эмодзи</span>
                   </span>
+                  <input type="file" id="message-file-input" accept=".pdf,.docx,.jpg,.jpeg,.png" multiple hidden>
+                  <span class="icon-control">
+                    <button class="button button-secondary icon-button" id="message-attach" type="button" aria-label="Прикрепить файлы"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14l6-6a2 2 0 0 1 3 3l-8 8a4 4 0 0 1-6-6l9-9a3 3 0 0 1 5 4l-8 8"/></svg></button>
+                    <span class="icon-tooltip" aria-hidden="true">Прикрепить файлы</span>
+                  </span>
                   <label class="visually-hidden" for="message-text">Сообщение</label>
-                  <textarea id="message-text" name="text" rows="1" maxlength="2000" placeholder="Сообщение" required></textarea>
+                  <textarea id="message-text" name="text" rows="1" maxlength="2000" placeholder="Сообщение"></textarea>
                   <span class="icon-control">
                     <button class="button button-primary icon-button" id="message-submit" type="submit" aria-label="Отправить"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 18-7-6 16-3.5-7L3 11Zm8.5 2L21 4"/></svg></button>
                     <span class="icon-tooltip" aria-hidden="true">Отправить</span>
