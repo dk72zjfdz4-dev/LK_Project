@@ -5,6 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test as base } from '@playwright/test';
+import { documentPdf } from '../certificate.mjs';
 
 const test = base.extend({
   // eslint-disable-next-line no-empty-pattern -- Playwright fixtures require a destructured first argument.
@@ -1235,6 +1236,209 @@ test('dean navigation and library access', async ({ page, cabinet }) => {
   await expect(page.getByRole('heading', { name: 'Библиотека', exact: true })).toBeVisible();
   await expect(page.getByText('Архив звёздных карт', { exact: true })).toBeVisible();
 });
+
+for (const width of [360, 1440]) {
+  test(`dean announces to each audience at ${width} px`, async ({ page, browser, cabinet }) => {
+    test.setTimeout(60_000);
+    await page.setViewportSize({ width, height: 820 });
+    await login(page, cabinet, 'dean');
+    const announcements = [
+      ['students', 'Студенты', `Приём деканата сегодня до 16:00 · ${width}`, ''],
+      ['teachers', 'Преподаватели', `Собрание кафедры · ${width}`, 'Обсудим планы на следующую неделю.'],
+      ['all', 'Все — студенты и преподаватели', `Изменение графика · ${width}`, 'Обновлённый график действует с понедельника.'],
+    ];
+    const history = page.locator('#announcements-history');
+    for (const [audience, label, title, body] of announcements) {
+      await page.getByRole('link', { name: 'Главная', exact: true }).filter({ visible: true }).click();
+      await page.getByRole('link', { name: 'Создать объявление', exact: true }).click();
+      const form = page.locator('#announcement-form');
+      const select = form.getByLabel('Аудитория');
+      await expect(select).toHaveValue('');
+      await select.selectOption(audience);
+      await form.getByLabel('Тема', { exact: true }).fill(title);
+      await form.getByLabel('Текст объявления').fill(body);
+      await form.getByRole('button', { name: 'Предпросмотр' }).click();
+      const preview = form.locator('#announcement-preview');
+      await expect(preview.getByText(title, { exact: true })).toBeVisible();
+      await expect(preview).toContainText(label);
+      await fits(page);
+      if (audience === 'students') {
+        await page.route('**/api/dean/announcements', async (route) => {
+          const response = await route.fetch();
+          expect(response.ok()).toBe(true);
+          await route.abort('failed');
+        }, { times: 1 });
+        await form.getByRole('button', { name: 'Опубликовать', exact: true }).click();
+        await expect(form.locator('#announcement-error')).toContainText('Можно повторить публикацию.');
+        await expect(form.getByLabel('Тема', { exact: true })).toHaveValue(title);
+      }
+      await form.getByRole('button', { name: 'Опубликовать', exact: true }).click();
+      await expect(history.getByText(title, { exact: true })).toHaveCount(1);
+    }
+    await page.reload();
+    for (const [, , title] of announcements) await expect(history.getByText(title, { exact: true })).toBeVisible();
+
+    for (const role of ['student', 'teacher']) {
+      const context = await browser.newContext({ viewport: { width, height: 820 } });
+      try {
+        const inbox = await context.newPage();
+        await login(inbox, cabinet, role);
+        expect((await inbox.request.post(cabinet.origin + '/api/dean/announcements', {
+          headers: { Origin: cabinet.origin }, data: { clientId: 'role-check', title: 'Проверка прав', audience: 'all' },
+        })).status()).toBe(403);
+        await inbox.goto(cabinet.origin + '/#updates');
+        const updates = inbox.locator('#updates-content');
+        await expect(updates.getByRole('heading', { name: announcements[2][2], exact: true })).toHaveCount(1);
+        for (const [audience, , title, body] of announcements) {
+          const received = audience === 'all' || audience === role + 's';
+          const notice = updates.locator('article').filter({ has: inbox.getByRole('heading', { name: title, exact: true }) });
+          await expect(notice).toHaveCount(received ? 1 : 0);
+          if (received && body) await expect(notice).toContainText(body);
+          if (received && !body) await expect(notice.locator('.record-copy')).toHaveCount(0);
+        }
+        await fits(inbox);
+      } finally {
+        await context.close();
+      }
+    }
+    await page.goto(cabinet.origin + '/#updates');
+    const updates = page.locator('#updates-content');
+    await expect(updates.getByRole('heading', { name: 'Системные уведомления' })).toBeVisible();
+    for (const [, , title] of announcements) await expect(updates.getByRole('heading', { name: title, exact: true })).toHaveCount(0);
+  });
+
+  test(`dean sends, revokes and replaces certificates in both channels at ${width} px`, async ({ page, browser, cabinet }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width, height: 820 });
+    await login(page, cabinet, 'dean');
+    const context = await browser.newContext({ viewport: { width, height: 820 } });
+    const outside = await browser.newContext();
+    try {
+      const student = await context.newPage();
+      await login(student, cabinet);
+      const other = await outside.newPage();
+      await login(other, cabinet, 'other');
+      await expect(page.locator('#dean-request-count')).toContainText(/Новые: \d+ · В работе: \d+/);
+      const cabinetData = async (actor) => (await (await actor.request.get(cabinet.origin + '/api/cabinet')).json());
+      const certificateType = 'Справка об обучении';
+      for (const [channel, label] of [['message', 'Через сообщение'], ['notification', 'Через уведомление']]) {
+        await student.goto(cabinet.origin + '/#requests/document-enrollment');
+        await student.locator('#document-enrollment').getByLabel('Детали запроса (необязательно)').fill('Справка по месту требования');
+        const submission = student.waitForResponse((response) => new URL(response.url()).pathname === '/api/requests'
+          && response.request().method() === 'POST');
+        await student.locator('#document-enrollment').getByRole('button', { name: 'Подать заявку' }).click();
+        expect((await submission).ok()).toBe(true);
+        const { requests } = await cabinetData(student);
+        const request = requests.find(({ type, status }) => type === certificateType && status === 'submitted');
+        expect(request).toBeDefined();
+        expect((await other.request.post(cabinet.origin + '/api/requests/' + request.id + '/take', {
+          headers: { Origin: cabinet.origin }, data: {},
+        })).status()).toBe(403);
+        const requestHash = '#requests/request-' + request.id;
+        await page.goto(cabinet.origin);
+        await page.getByRole('link', { name: 'Запросы на справки', exact: true }).click();
+        const card = page.locator('#request-' + request.id);
+        const search = page.locator('#dean-request-search');
+        const status = page.locator('#dean-request-status');
+        await search.fill('Нюша');
+        await status.selectOption('submitted');
+        await expect(card).toBeVisible();
+        await status.selectOption('');
+        await card.locator(':scope > summary').click();
+        await expect(card).toContainText('Нюша Мироновна Романова');
+        await expect(card).toContainText(certificateType);
+        await expect(card).toContainText('Справка по месту требования');
+        await card.getByRole('button', { name: 'Взять в работу' }).click();
+        await expect(card.locator(':scope > summary')).toContainText(/В работе|В обработке/);
+
+        const upload = async (version) => {
+          const name = `spravka-${width}-${channel}-${version}.pdf`;
+          const buffer = await documentPdf(name, (doc) => doc.text('Демонстрационная справка. Версия ' + version));
+          await card.getByLabel('Файл справки').setInputFiles({ name, mimeType: 'application/pdf', buffer });
+          await card.getByRole('button', { name: version === 1 ? 'Загрузить справку' : 'Заменить справку' }).click();
+          await expect(card.locator(':scope > summary')).toContainText('Готова к отправке');
+          await expect(card).toContainText(name);
+          return name;
+        };
+        const send = async (name) => {
+          const delivery = card.getByLabel('Способ доставки');
+          await delivery.selectOption(channel);
+          await card.getByRole('button', { name: 'Отправить справку', exact: true }).click();
+          await expect(card).toContainText(name);
+          await expect(card).toContainText(label);
+          await expect(card).toContainText('Нюша Мироновна Романова');
+          await fits(page);
+          await card.getByRole('button', { name: 'Подтвердить отправку' }).click();
+          await expect(card.locator(':scope > summary')).toContainText('Отправлена');
+        };
+
+        const openStudentDelivery = async (name) => {
+          if (channel === 'notification') {
+            await student.goto(cabinet.origin + '/#updates');
+            const notice = student.locator('#updates-content article').filter({
+              has: student.locator('a[href="' + requestHash + '"]'),
+            }).filter({ has: student.getByRole('heading', { name: 'Справка готова', exact: true }) }).first();
+            await notice.getByRole('link', { name: 'Открыть запрос' }).click();
+            return student.locator('#request-' + request.id);
+          }
+          const { dialogues } = await cabinetData(student);
+          const dean = dialogues.find(({ partnerRole }) => partnerRole === 'dean');
+          expect(dean).toBeDefined();
+          await student.goto(cabinet.origin + '/#messages/dialogue-' + dean.id);
+          const message = student.locator('#messages-content article.message').filter({ hasText: name });
+          await expect(message).toBeVisible();
+          const messageId = await message.locator('..').getAttribute('data-message-id');
+          return student.locator('#messages-content li[data-message-id="' + messageId + '"] article.message');
+        };
+        const begin = await upload(1);
+        await page.reload();
+        await card.locator(':scope > summary').click();
+        await expect(card).toContainText(begin);
+        await send(begin);
+        const delivered = await openStudentDelivery(begin);
+        const download = delivered.getByRole('link', { name: 'Скачать справку' });
+        const oldLink = await download.getAttribute('href');
+        expect(oldLink).toBeTruthy();
+        expect((await other.request.get(new URL(oldLink, cabinet.origin).href)).status()).toBe(404);
+        const [file] = await Promise.all([student.waitForEvent('download'), download.click()]);
+        expect(file.suggestedFilename()).toBe(begin);
+
+        const beforeRecall = channel === 'notification'
+          ? student.locator('#updates-content article').filter({ has: student.locator('a[href="' + requestHash + '"]') }).first()
+          : delivered;
+        await card.locator('summary').filter({ hasText: /^Отозвать отправку$/ }).click();
+        await expect(card).toContainText(begin);
+        await expect(card).toContainText(label);
+        await card.getByRole('button', { name: 'Подтвердить отзыв' }).click();
+        await expect(card.locator(':scope > summary')).toContainText('Готова к отправке');
+        if (channel === 'notification') await student.goto(cabinet.origin + '/#updates');
+        else await student.evaluate(() => globalThis.document.dispatchEvent(new Event('visibilitychange')));
+        await expect(beforeRecall).toContainText('Справка отозвана');
+        await expect(beforeRecall.getByRole('link', { name: 'Скачать справку' })).toHaveCount(0);
+        expect((await student.request.get(new URL(oldLink, cabinet.origin).href)).status()).toBe(404);
+        await student.goto(cabinet.origin + '/' + requestHash);
+        const studentRequest = student.locator('#request-' + request.id);
+        await expect(studentRequest).toContainText('Справка отозвана');
+        await expect(studentRequest.getByRole('link', { name: 'Скачать справку' })).toHaveCount(0);
+
+        const replacement = await upload(2);
+        await send(replacement);
+        const resent = await openStudentDelivery(replacement);
+        const newLink = await resent.getByRole('link', { name: 'Скачать справку' }).getAttribute('href');
+        expect(newLink).not.toBe(oldLink);
+        expect((await student.request.get(new URL(newLink, cabinet.origin).href)).ok()).toBe(true);
+        expect((await student.request.get(new URL(oldLink, cabinet.origin).href)).status()).toBe(404);
+        await card.locator('summary').filter({ hasText: /^История выдачи справки$/ }).click();
+        await expect(card.getByText(new RegExp('Отправка отозвана.*' + begin + '.*Версия 1'))).toBeVisible();
+        await expect(card.getByText(new RegExp('Справка отправлена.*' + replacement + '.*Версия 2'))).toBeVisible();
+        await fits(student);
+      }
+    } finally {
+      await context.close();
+      await outside.close();
+    }
+  });
+}
 
 test('library searches titles and authors, filters disciplines and remembers a favorite', async ({ page, cabinet }) => {
   await login(page, cabinet);

@@ -11,14 +11,15 @@ const views = {
   messages: 'Сообщения',
   contacts: 'Контакты',
   updates: 'Уведомления',
+  announcements: 'Объявления',
   campus: 'Карта кампуса',
   profile: 'Профиль',
   menu: 'Меню',
 };
 const roleViews = {
-  student: Object.keys(views),
+  student: Object.keys(views).filter((view) => view !== 'announcements'),
   teacher: ['home', 'schedule', 'grades', 'assignments', 'library', 'messages', 'contacts', 'updates', 'campus', 'profile', 'menu'],
-  dean: ['home', 'requests', 'library', 'messages', 'contacts', 'updates', 'campus', 'profile', 'menu'],
+  dean: ['home', 'requests', 'announcements', 'library', 'messages', 'contacts', 'updates', 'campus', 'profile', 'menu'],
 };
 const roleNames = { student: 'Студент', teacher: 'Преподаватель', dean: 'Деканат' };
 const weekdays = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
@@ -53,6 +54,8 @@ let activeView;
 let teacherLessons = [];
 let teacherMonthLessons = [];
 let teacherViewLoad;
+let announcementLoad;
+let announcementDraft;
 const teacherJournalFilters = { date: '', faculty: '' };
 let schedule;
 let scheduleLoad;
@@ -168,12 +171,17 @@ function route(focusHeading = false) {
   const journalBack = byId('journal-back');
   journalBack.hidden = active !== 'grades' || profile.role !== 'teacher' || !targetId?.startsWith('journal-');
   menuBack.hidden = !journalBack.hidden || history.state?.fromMenu !== active;
-  heading.textContent = views[active];
+  heading.textContent = active === 'requests' && profile.role === 'dean' ? 'Запросы на справки' : views[active];
   byId('header-inbox').hidden = active !== 'home';
   document.title = views[active] + ' — Личный кабинет';
   renderCabinet();
+  if (cabinet && (active === 'requests' || active === 'updates')) void loadCabinet({ quiet: true, fresh: true });
   if (profile.role === 'teacher') loadTeacherView(active, targetId);
   if (active === 'requests' && profile.role === 'student') loadHelpCatalog();
+  if (active === 'announcements') {
+    if (targetId === 'announcement-form') showAnnouncementForm();
+    loadAnnouncements();
+  }
   if (active === 'library') loadLibrary();
   if (active === 'profile') loadPortfolio();
   heading.classList.toggle('pointer-navigation', pointerNavigation);
@@ -227,6 +235,15 @@ function preservePagePosition(update) {
 }
 
 function showLogin(message = '', focusHeading = false) {
+  announcementLoad = announcementDraft = undefined;
+  byId('announcement-form').reset();
+  byId('announcement-form').hidden = true;
+  byId('announcement-new').ariaExpanded = 'false';
+  byId('announcement-preview').hidden = true;
+  byId('announcement-preview').replaceChildren();
+  byId('announcement-error').textContent = '';
+  byId('announcements-history').replaceChildren();
+  byId('dean-request-search').value = byId('dean-request-status').value = '';
   teacherViewLoad = undefined;
   teacherLessons = [];
   teacherMonthLessons = [];
@@ -348,6 +365,7 @@ function showApp(account, focusHeading = false) {
   byId('profile-role').textContent = roleName;
   byId('sidebar-group').textContent = groupOrRole;
   byId('document-catalog').hidden = profile.role !== 'student';
+  byId('dean-actions').hidden = byId('dean-request-filters').hidden = profile.role !== 'dean';
   byId('home-status').hidden = true;
   byId('home-upcoming').hidden = true;
   byId('home-changes').hidden = true;
@@ -856,6 +874,7 @@ async function loadSchedule({ quiet = false, week } = {}) {
 
 const requestStatuses = {
   submitted: 'Подана', processing: 'В обработке', ready: 'Готова', rejected: 'Отклонена',
+  ready_to_send: 'Готова к отправке', sent: 'Отправлена',
 };
 const appealStatuses = {
   pending: ['На рассмотрении', 'processing'],
@@ -958,7 +977,8 @@ function renderCabinet(force = false) {
       renderSection('assignments-content', [cabinet.grades, cabinet.assignments, cabinet.appeals], renderAssignments, force);
       break;
     case 'requests':
-      renderSection('requests-content', cabinet.requests, renderRequests, force);
+      if (profile.role === 'dean') renderDeanQueue(force);
+      else renderSection('requests-content', cabinet.requests, renderRequests, force);
       break;
     case 'messages':
       byId('messaging').hidden = false;
@@ -1085,6 +1105,12 @@ function renderDashboard() {
   const pendingAssignments = cabinet?.assignments.filter((item) => student
     ? !item.submission
     : item.submission?.status === 'submitted').length;
+  if (profile.role === 'dean') {
+    const requests = cabinet?.requests ?? [];
+    const count = (status) => requests.filter((item) => item.status === status).length;
+    byId('dean-request-count').textContent = 'Новые: ' + count('submitted') + ' · В работе: ' + count('processing')
+      + ' · Готовы к отправке: ' + count('ready_to_send');
+  }
   const now = Date.now();
   const outstanding = student ? (cabinet?.assignments ?? [])
     .filter((item) => !item.submission)
@@ -2029,17 +2055,260 @@ async function performForm(form, output, submit, { onSaved, quiet = false, isCur
   }
 }
 
+const announcementAudiences = { students: 'Студенты', teachers: 'Преподаватели', all: 'Все — студенты и преподаватели' };
+const certificateChannels = { message: 'Через сообщение', notification: 'Через уведомление' };
+const revokedCertificateNote = 'Отзыв блокирует дальнейшее скачивание из «Орбиты». Копия, уже сохранённая на устройстве, остаётся у получателя.';
+
+function showAnnouncementForm() {
+  const form = byId('announcement-form');
+  form.hidden = false;
+  byId('announcement-new').ariaExpanded = 'true';
+  form.focus({ preventScroll: true });
+}
+
+async function loadAnnouncements() {
+  const account = profile;
+  const load = {};
+  announcementLoad = load;
+  const root = byId('announcements-history');
+  const current = () => profile === account && announcementLoad === load;
+  try {
+    const { announcements } = await request('/api/dean/announcements');
+    if (!current()) return;
+    root.replaceChildren(panel('История объявлений', listFor(announcements, (item) => {
+      const entry = element('article', 'cabinet-layout');
+      entry.append(element('h3', '', item.title), metadata([
+        ['Аудитория', announcementAudiences[item.audience]], ['Автор', item.author], ['Опубликовано', eventTime(item.createdAt)],
+        ['Получателей', item.recipientCount],
+      ]));
+      if (item.text) entry.append(element('p', 'record-copy dean-copy', item.text));
+      return entry;
+    }, 'Объявлений пока нет.')));
+  } catch (error) {
+    if (!current() || endSession(error)) return;
+    root.replaceChildren(element('p', 'local-error', error.message), actionButton('Повторить загрузку', loadAnnouncements));
+  }
+}
+
+function previewAnnouncement(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = new FormData(form);
+  const draft = { audience: data.get('audience'), title: data.get('title').trim(), text: data.get('text').trim() };
+  const output = byId('announcement-error');
+  if (!Object.hasOwn(announcementAudiences, draft.audience) || !draft.title) {
+    output.textContent = 'Выберите аудиторию и укажите тему.';
+    return;
+  }
+  const fingerprint = JSON.stringify(draft);
+  if (announcementDraft?.fingerprint !== fingerprint) announcementDraft = { fingerprint, clientId: crypto.randomUUID() };
+  output.textContent = '';
+  const preview = byId('announcement-preview');
+  const account = profile;
+  const publish = actionButton('Опубликовать', async () => {
+    if (publish.disabled) return;
+    publish.disabled = true;
+    output.textContent = '';
+    const fields = [...form.elements];
+    for (const field of fields) field.disabled = true;
+    try {
+      await post('/api/dean/announcements', { ...draft, clientId: announcementDraft.clientId });
+      if (profile !== account) return;
+      announcementDraft = undefined;
+      form.reset();
+      preview.replaceChildren();
+      preview.hidden = form.hidden = true;
+      byId('announcement-new').ariaExpanded = 'false';
+      byId('announcement-new').focus({ preventScroll: true });
+      byId('action-status').textContent = 'Объявление опубликовано.';
+      await loadAnnouncements();
+    } catch (error) {
+      if (profile === account && !endSession(error)) output.textContent = error.message + ' Можно повторить публикацию.';
+    } finally {
+      for (const field of fields) field.disabled = false;
+      publish.disabled = false;
+    }
+  }, true);
+  preview.replaceChildren(element('h3', '', 'Предпросмотр объявления'), element('strong', '', draft.title),
+    element('p', 'muted', 'Аудитория: ' + announcementAudiences[draft.audience]));
+  if (draft.text) preview.append(element('p', 'dean-copy', draft.text));
+  preview.append(publish);
+  preview.hidden = false;
+  publish.focus({ preventScroll: true });
+}
+
+function renderDeanQueue(force = false) {
+  if (!cabinet || profile.role !== 'dean') return;
+  const query = byId('dean-request-search').value.trim().toLocaleLowerCase('ru').replaceAll('ё', 'е');
+  const status = byId('dean-request-status').value;
+  const requests = cabinet.requests.filter((item) => pendingTarget === 'request-' + item.id
+    || ((!status || item.status === status)
+      && (!query || item.studentName?.toLocaleLowerCase('ru').replaceAll('ё', 'е').includes(query))));
+  renderSection('requests-content', requests, renderRequests, force);
+}
+
+function certificateDeliveryContent(delivery) {
+  const content = element('div', 'certificate-delivery');
+  if (delivery.status === 'revoked') {
+    content.append(element('strong', '', 'Справка отозвана'));
+    content.append(element('p', 'muted', revokedCertificateNote));
+  } else if (delivery.downloadUrl) {
+    content.append(element('p', 'record-copy', delivery.filename + ' · ' + messageFileSize(delivery.size)),
+      anchor(delivery.downloadUrl, 'file-link', 'Скачать справку'));
+  }
+  return content;
+}
+
+function renderDeanCertificate(item, detail) {
+  const endpoint = resource('/api/requests', item.id);
+  const file = item.certificateFile;
+  const sent = item.delivery?.status === 'sent';
+  const controls = element('div', 'cabinet-layout dean-certificate');
+  const output = element('p', 'local-error');
+  output.setAttribute('role', 'alert');
+  function action(label, path, body, primary = false) {
+    const button = actionButton(label, async () => {
+      if (button.disabled) return;
+      const account = profile;
+      button.disabled = true;
+      output.textContent = '';
+      try {
+        await post(endpoint + path, body);
+        if (profile === account) {
+          byId('dean-request-status').value = '';
+          await loadCabinet({ fresh: true });
+        }
+      } catch (error) {
+        if (profile === account && !endSession(error)) output.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    }, primary);
+    return button;
+  }
+  controls.append(metadata([
+    ['Студент', item.studentName], ['Группа', item.studentGroup || '—'],
+    ...(item.studentFaculty ? [['Факультет', item.studentFaculty]] : []),
+    ['Вид справки', item.type], ['Подана', eventTime(item.createdAt)],
+  ]));
+  if (item.details) {
+    if (typeof item.details === 'string') controls.append(element('p', 'dean-copy', item.details));
+    else for (const [label, value] of Object.entries(item.details)) {
+      if (typeof value === 'string' && value) controls.append(element('p', 'dean-copy', label + ': ' + value));
+    }
+  }
+  if (item.status === 'submitted') controls.append(action('Взять в работу', '/take', {}, true));
+  if (['processing', 'ready_to_send'].includes(item.status)) {
+    if (file) {
+      const fileActions = element('div', 'teacher-toolbar');
+      const previewFile = anchor(file.downloadUrl, 'file-link', 'Проверить файл');
+      previewFile.target = '_blank';
+      previewFile.rel = 'noopener';
+      fileActions.append(previewFile,
+        action('Удалить файл', '/file/remove', { fileId: file.id }));
+      controls.append(element('p', '', file.filename + ' · ' + messageFileSize(file.size)), fileActions);
+    }
+    let uploadKey;
+    let uploadFingerprint;
+    const upload = formFor('certificate-upload-' + item.id, file ? 'Заменить справку' : 'Загрузить справку', [
+      { name: 'file', label: 'Файл справки', type: 'file', accept: '.pdf,.docx' },
+    ], (data) => {
+      const selected = data.get('file');
+      const fingerprint = JSON.stringify([selected.name, selected.size, selected.lastModified]);
+      if (uploadFingerprint !== fingerprint) {
+        uploadFingerprint = fingerprint;
+        uploadKey = crypto.randomUUID();
+      }
+      return uploadCabinetDocument(endpoint + '/file', selected, { 'X-Upload-Id': uploadKey });
+    }, { onSaved: () => { byId('dean-request-status').value = ''; } });
+    controls.append(upload);
+    if (file) {
+      const form = element('form', 'cabinet-form');
+      form.id = 'certificate-send-' + item.id;
+      const label = element('label', 'teacher-field', 'Способ доставки');
+      const select = element('select');
+      select.name = 'channel';
+      select.setAttribute('aria-label', 'Способ доставки');
+      select.required = true;
+      for (const [value, text] of [['', 'Выберите способ'], ...Object.entries(certificateChannels)]) {
+        const option = element('option', '', text);
+        option.value = value;
+        select.append(option);
+      }
+      label.append(select);
+      const { field: commentField, input: comment } = teacherField('Комментарий к сообщению', 'textarea');
+      comment.name = 'comment';
+      comment.maxLength = 500;
+      commentField.hidden = true;
+      const preview = element('div', 'cabinet-layout');
+      const send = element('button', 'button button-primary', 'Отправить справку');
+      send.type = 'submit';
+      let confirmation;
+      const edit = () => {
+        commentField.hidden = select.value !== 'message';
+        preview.replaceChildren();
+        form.dataset.dirty = '';
+      };
+      select.addEventListener('change', edit);
+      comment.addEventListener('input', edit);
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const channel = select.value;
+        const text = channel === 'message' ? comment.value.trim() : '';
+        const signature = JSON.stringify([channel, text]);
+        if (confirmation?.signature !== signature) confirmation = { signature, clientId: crypto.randomUUID() };
+        const confirm = action('Подтвердить отправку', '/send', {
+          fileId: file.id, channel, comment: text, clientId: confirmation.clientId,
+        }, true);
+        preview.replaceChildren(metadata([
+          ['Получатель', item.studentName], ['Вид справки', item.type], ['Файл', file.filename], ['Способ доставки', certificateChannels[channel]],
+        ]), confirm);
+        confirm.focus({ preventScroll: true });
+      });
+      form.append(label, commentField, send, preview);
+      controls.append(form);
+    }
+  }
+  if (sent) {
+    const delivery = item.delivery;
+    const revoke = element('details', 'record-details');
+    revoke.append(element('summary', 'record-summary', 'Отозвать отправку'),
+      metadata([['Файл', delivery.filename], ['Студент', item.studentName], ['Способ доставки', certificateChannels[delivery.channel]]]),
+      element('p', 'muted', revokedCertificateNote),
+      action('Подтвердить отзыв', '/revoke', { deliveryId: delivery.id }, true));
+    controls.append(metadata([
+      ['Файл', delivery.filename], ['Отправлена', eventTime(delivery.createdAt)],
+      ['Способ доставки', certificateChannels[delivery.channel]], ['Автор отправки', delivery.author],
+    ]), revoke);
+  }
+  if (item.certificateHistory?.length) {
+    const history = element('details', 'record-details');
+    const labels = { upload: 'Файл загружен', remove: 'Файл удалён', send: 'Справка отправлена', revoke: 'Отправка отозвана' };
+    history.append(element('summary', 'record-summary', 'История выдачи справки'), listFor(item.certificateHistory, (event) =>
+      element('p', 'record-copy', [labels[event.action] ?? event.action, event.filename, 'Версия ' + event.version,
+        event.author, eventTime(event.createdAt), certificateChannels[event.channel]].filter(Boolean).join(' · '))));
+    controls.append(history);
+  }
+  controls.append(output);
+  detail.append(controls);
+}
+
 function renderRequests(requests) {
   const student = profile.role === 'student';
-  return [panel(student ? 'Мои заявки' : 'Заявки студентов', listFor(requests, (item) => {
+  return [panel(student ? 'Мои заявки' : 'Очередь запросов', listFor(requests, (item) => {
     const detail = element('details', 'record-details');
     detail.id = 'request-' + item.id;
     const summary = element('summary', 'record-summary');
     summary.id = detail.id + '-summary';
     const labels = element('span', 'record-labels');
-    labels.append(element('strong', '', item.type), element('span', 'muted', [!student && item.studentName, eventTime(item.createdAt)].filter(Boolean).join(' · ')));
-    summary.append(labels, statusBadge(requestStatuses[item.status] || item.status, item.status));
+    labels.append(element('strong', '', item.type), element('span', 'muted',
+      [!student && item.studentName, !student && item.studentGroup, eventTime(item.createdAt)].filter(Boolean).join(' · ')));
+    const visibleStatus = student && item.status === 'ready_to_send' ? 'processing' : item.status;
+    summary.append(labels, statusBadge(!student && visibleStatus === 'processing' ? 'В работе'
+      : requestStatuses[visibleStatus] || visibleStatus, visibleStatus));
     detail.append(summary);
+    if (student && item.delivery) detail.append(certificateDeliveryContent(item.delivery));
+    if (!student) renderDeanCertificate(item, detail);
     if (student && item.status === 'ready') {
       const actions = element('div', 'request-document-actions');
       const download = anchor(resource('/api/requests', item.id, '/pdf'), 'inline-link', 'Скачать PDF');
@@ -2058,13 +2327,11 @@ function renderRequests(requests) {
       if (event.note) entry.append(element('p', 'record-copy', event.note));
       return entry;
     }, 'Записей пока нет.'));
-    if (!student && ['submitted', 'processing'].includes(item.status)) {
-      const options = item.status === 'submitted' ? ['processing', 'ready', 'rejected'] : ['ready', 'rejected'];
-      detail.append(formFor('request-status-' + item.id, 'Обновить статус', [
-        { name: 'status', label: 'Новый статус', options: options.map((status) => [status, requestStatuses[status]]) },
+    if (!student && item.status === 'processing') {
+      detail.append(formFor('request-status-' + item.id, 'Отклонить запрос', [
         { name: 'note', label: 'Комментарий', rows: 2, maxLength: 1500, required: false },
       ], (data) => post(resource('/api/requests', item.id, '/status'), {
-        status: data.get('status'), note: data.get('note').trim(),
+        status: 'rejected', note: data.get('note').trim(),
       })));
     }
     return detail;
@@ -2084,9 +2351,11 @@ function renderDocument(item) {
   const id = 'document-' + item.id;
   const status = element('p', 'muted document-submit-status');
   status.setAttribute('role', 'status');
-  const form = formFor(id + '-form', 'Подать заявку', [], () => {
+  const form = formFor(id + '-form', 'Подать заявку', [
+    { name: 'details', label: 'Детали запроса (необязательно)', rows: 2, maxLength: 1500, required: false },
+  ], (data) => {
     status.textContent = '';
-    return post('/api/requests', { type: item.title });
+    return post('/api/requests', { type: item.title, details: data.get('details').trim() });
   }, {
     onSaved: () => { status.textContent = 'Заявка подана. Статус появится в разделе «Мои заявки».'; },
   });
@@ -2371,13 +2640,17 @@ const docxType = 'application/vnd.openxmlformats-officedocument.wordprocessingml
 const uploadTypes = { pdf: 'application/pdf', docx: docxType };
 
 function uploadSubmission(id, file) {
+  return uploadCabinetDocument(resource('/api/assignments', id, '/submission'), file);
+}
+
+function uploadCabinetDocument(path, file, headers = {}) {
   if (!file?.size) throw new Error('Выберите файл PDF или DOCX.');
   if (file.size > 10 * 1024 * 1024) throw new Error('Размер файла превышает 10 МБ.');
   const extension = file.name.trim().toLowerCase().match(/\.([^.]+)$/)?.[1];
   if (!Object.hasOwn(uploadTypes, extension)) throw new Error('Выберите файл PDF или DOCX.');
-  return request(resource('/api/assignments', id, '/submission'), {
+  return request(path, {
     method: 'POST',
-    headers: { 'Content-Type': uploadTypes[extension], 'X-Filename': encodeURIComponent(file.name) },
+    headers: { 'Content-Type': uploadTypes[extension], 'X-Filename': encodeURIComponent(file.name), ...headers },
     body: file,
   });
 }
@@ -3256,14 +3529,24 @@ function renderDialogueMessages(messages, content) {
       if (receipt) label.append(receipt);
       const actions = messageActions(item);
       label.append(actions);
-      if (item.text) message.append(element('p', 'record-copy', item.text));
+      const copy = element('p', 'record-copy', item.text);
+      copy.hidden = !item.text || item.certificateDelivery?.status === 'revoked';
+      message.append(copy);
       if (item.attachments?.length) message.append(renderMessageAttachments(item.attachments));
       message.append(label);
       row.append(message);
-      entry = { row, receipt, deleteForAll: actions.querySelector('[data-scope="all"]') };
+      entry = { row, receipt, label, copy, deleteForAll: actions.querySelector('[data-scope="all"]') };
       renderedMessages.set(item.id, entry);
       row.dataset.messageId = item.id;
       list.append(row);
+    }
+    const deliveryKey = JSON.stringify(item.certificateDelivery);
+    if (entry.deliveryKey !== deliveryKey) {
+      entry.delivery?.remove();
+      entry.delivery = item.certificateDelivery && certificateDeliveryContent(item.certificateDelivery);
+      if (entry.delivery) entry.label.before(entry.delivery);
+      entry.deliveryKey = deliveryKey;
+      entry.copy.hidden = !item.text || item.certificateDelivery?.status === 'revoked';
     }
     if (entry.receipt) {
       if (item.read && entry.deleteForAll === document.activeElement) {
@@ -3402,9 +3685,13 @@ function renderUpdates(updates) {
     const update = element('article', 'record-line');
     update.id = 'notice-' + item.id;
     const body = element('div');
-    const heading = element('h3', 'lesson-title', item.title);
+    const revoked = item.certificateDelivery?.status === 'revoked';
+    const heading = element('h3', 'lesson-title', revoked ? 'Справка отозвана' : item.title);
     heading.tabIndex = -1;
-    body.append(heading, element('p', 'record-copy', item.text));
+    body.append(heading);
+    if (item.text && !revoked) body.append(element('p', 'record-copy', item.text));
+    if (revoked) body.append(element('p', 'muted', revokedCertificateNote));
+    if (item.requestId) body.append(anchor('#requests/request-' + item.requestId, 'inline-link', 'Открыть запрос'));
     const createdAt = element('time', 'muted', eventTime(item.createdAt));
     createdAt.dateTime = item.createdAt;
     update.append(body, createdAt);
@@ -3681,6 +3968,16 @@ async function runSearch(query, account, load) {
 }
 
 byId('cabinet-retry').addEventListener('click', () => loadCabinet({ fresh: true }));
+byId('announcement-new').addEventListener('click', showAnnouncementForm);
+byId('announcement-form').addEventListener('submit', previewAnnouncement);
+byId('announcement-form').addEventListener('input', () => {
+  const preview = byId('announcement-preview');
+  preview.hidden = true;
+  preview.replaceChildren();
+  byId('announcement-error').textContent = '';
+});
+byId('dean-request-search').addEventListener('input', () => renderDeanQueue());
+byId('dean-request-status').addEventListener('change', () => renderDeanQueue());
 byId('dialogue-search').addEventListener('input', refreshDialogueList);
 byId('dialogue-filter').addEventListener('change', refreshDialogueList);
 byId('dialogue-category').addEventListener('change', () => {

@@ -1492,6 +1492,15 @@ details[open] > .record-summary::before { transform: rotate(45deg); }
 
 .teacher-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .teacher-toolbar .button { min-height: 44px; }
+.dean-actions, .dean-request-filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.dean-actions { margin-block: 14px; }
+.dean-actions .button { display: inline-flex; align-items: center; margin: 0; text-decoration: none; }
+.dean-actions p { flex-basis: 100%; }
+.dean-request-filters .teacher-field { flex: 1 1 160px; }
+.dean-certificate { margin-block-start: 12px; }
+.dean-copy { white-space: pre-wrap; overflow-wrap: anywhere; }
+.certificate-delivery { margin-block: 8px; overflow-wrap: anywhere; }
+.certificate-delivery .file-link { display: inline-flex; align-items: center; min-height: 44px; }
 .journal-filters { align-items: center; margin-block-start: 10px; }
 .journal-date-picker { position: relative; }
 .journal-date-picker > summary { list-style: none; cursor: pointer; }

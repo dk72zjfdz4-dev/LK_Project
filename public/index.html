@@ -125,6 +125,7 @@
               </svg>
               Уведомления
             </a>
+            <a href="#announcements" data-view="announcements"><span class="nav-icon icon-sheet" aria-hidden="true"></span>Объявления</a>
           </div>
         </div>
         <div class="nav-group" data-nav-group="campus">
@@ -203,6 +204,11 @@
         <section class="view" id="view-home" aria-label="Обзор учебного дня">
           <div class="welcome">
             <h2 id="welcome-name"></h2>
+          </div>
+          <div class="panel dean-actions" id="dean-actions" hidden>
+            <a class="button button-primary" href="#announcements/announcement-form">Создать объявление</a>
+            <a class="button button-secondary" href="#requests">Запросы на справки</a>
+            <p class="muted" id="dean-request-count"></p>
           </div>
           <div class="schedule-status" id="home-status">
             <p role="status" data-status></p>
@@ -317,7 +323,38 @@
             <button class="button button-secondary" id="document-catalog-retry" type="button" hidden>Повторить</button>
             <div id="documents-content"></div>
           </section>
+          <div class="panel dean-request-filters" id="dean-request-filters" hidden>
+            <label class="teacher-field">Поиск студента по имени<input id="dean-request-search" type="search" autocomplete="off"></label>
+            <label class="teacher-field">Статус<select id="dean-request-status" aria-label="Статус">
+              <option value="">Все статусы</option>
+              <option value="submitted">Новые</option>
+              <option value="processing">В работе</option>
+              <option value="ready_to_send">Готовы к отправке</option>
+              <option value="sent">Отправлены</option>
+              <option value="ready">Готовые по прежней выдаче</option>
+              <option value="rejected">Отклонены</option>
+            </select></label>
+          </div>
           <div id="requests-content"></div>
+        </section>
+        <section class="view cabinet-layout" id="view-announcements" aria-label="Объявления деканата" hidden>
+          <section class="panel cabinet-layout">
+            <button class="button button-primary" id="announcement-new" type="button" aria-expanded="false" aria-controls="announcement-form">Создать объявление</button>
+            <form class="cabinet-form" id="announcement-form" tabindex="-1" hidden>
+              <label class="teacher-field">Аудитория<select name="audience" aria-label="Аудитория" required>
+                <option value="">Выберите аудиторию</option>
+                <option value="students">Студенты</option>
+                <option value="teachers">Преподаватели</option>
+                <option value="all">Все — студенты и преподаватели</option>
+              </select></label>
+              <label class="teacher-field">Тема<input name="title" required maxlength="160"></label>
+              <label class="teacher-field">Текст объявления<textarea name="text" rows="4" maxlength="4000"></textarea></label>
+              <button class="button button-secondary" type="submit">Предпросмотр</button>
+              <div class="cabinet-layout" id="announcement-preview" hidden></div>
+              <p class="local-error" id="announcement-error" role="alert"></p>
+            </form>
+          </section>
+          <div id="announcements-history"></div>
         </section>
         <section class="view" id="view-messages" aria-label="Переписка" hidden>
           <div class="messaging" id="messaging" hidden>

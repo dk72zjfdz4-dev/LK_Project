@@ -7,7 +7,7 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "build": "node --check server.mjs && node --check cabinet.mjs && node --check teacher.mjs && node --check knowledge.mjs && node --check certificate.mjs && node --check portfolio.mjs && node --check portfolio-export.mjs && node --check public/app.js && node --check public/certificate-print.js",
+    "build": "node --check server.mjs && node --check cabinet.mjs && node --check teacher.mjs && node --check dean.mjs && node --check knowledge.mjs && node --check certificate.mjs && node --check portfolio.mjs && node --check portfolio-export.mjs && node --check public/app.js && node --check public/certificate-print.js",
     "lint": "eslint .",
     "test": "node --test",
     "test:browser": "playwright test"

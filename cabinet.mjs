@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { crc32, inflateRawSync } from 'node:zlib';
 import { certificatePdf, certificatePrint } from './certificate.mjs';
+import { createDeanWorkflows, installDeanWorkflows } from './dean.mjs';
 import { answerFor, documents, faqFor } from './knowledge.mjs';
 import { createPortfolio, isJpeg, isPng, migratePortfolio } from './portfolio.mjs';
 
@@ -202,6 +203,7 @@ export function installCabinet(db) {
   if (!db.prepare("SELECT 1 FROM pragma_table_info('students') WHERE name = 'directory_only'").get()) {
     db.exec('ALTER TABLE students ADD COLUMN directory_only INTEGER NOT NULL DEFAULT 0 CHECK (directory_only IN (0, 1))');
   }
+  installDeanWorkflows(db);
 }
 
 function demoPdf() {
@@ -720,7 +722,8 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     ORDER BY semester DESC, studentName, e.id
   `);
   const requests = prepare(`
-    SELECT r.id, type, status, created_at AS createdAt, student.full_name AS studentName
+    SELECT r.id, type, status, created_at AS createdAt, student.full_name AS studentName,
+      student.student_group AS studentGroup, student.faculty AS studentFaculty, student.program AS studentProgram
     FROM requests r JOIN students student ON student.id = r.student_id
     WHERE r.student_id = ? OR ? = 'dean'
     ORDER BY r.id DESC
@@ -1003,7 +1006,7 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     return {
       grades: role === 'dean' ? [] : projectGrades(grades.all(id, role, id, role)),
       requests: role === 'teacher' ? [] : requests.all(id, role)
-        .map((row) => ({ ...row, history: requestHistory.all(row.id) })),
+        .map((row) => deanWorkflows.requestView({ ...row, history: requestHistory.all(row.id) }, role)),
       dialogues: conversations,
       dialogueContacts: dialogueContacts.all(id),
       assignments: role === 'dean' ? [] : assessments.all(id, id)
@@ -1013,7 +1016,10 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
         })),
       appeals: role === 'dean' ? [] : appeals.all(id, id)
         .map(({ history, ...appeal }) => ({ ...appeal, history: JSON.parse(history) })),
-      notifications: notifications.all(id),
+      notifications: notifications.all(id).map((notice) => {
+        const certificateDelivery = deanWorkflows.notificationDelivery(notice.id);
+        return certificateDelivery ? { ...notice, certificateDelivery, requestId: certificateDelivery.requestId } : notice;
+      }),
       contacts: contacts(viewer),
       unreadCount: conversations.reduce((total, dialogue) => total + dialogue.unreadCount, 0),
     };
@@ -1072,8 +1078,10 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
   function submitRequest(viewer, _id, body) {
     const type = text(body.type, 'Укажите вид справки', 80);
     if (!documents.some((item) => item.title === type)) throw new HttpError(400, 'Выберите вид документа из каталога.');
+    const details = text(body.details, 'Укажите детали запроса', 1500, false);
     const createdAt = now();
     const { lastInsertRowid } = createRequest.run(viewer.id, type, createdAt);
+    deanWorkflows.saveDetails(lastInsertRowid, details);
     createHistory.run(lastInsertRowid, 'submitted', '', createdAt);
     for (const { id } of dean.all()) createNotice.run(id, 'Новая заявка на справку', type, createdAt);
   }
@@ -1081,6 +1089,9 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
   function changeRequest(_viewer, id, body) {
     const request = found(requestById.get(id), 'Заявка не найдена.');
     const { status } = body;
+    if (deanWorkflows.isManaged(id) && (status !== 'rejected' || deanWorkflows.hasFile(id))) {
+      throw new HttpError(409, 'Используйте выдачу справки в карточке запроса.');
+    }
     const allowed = ['processing', 'ready', 'rejected'];
     if (!allowed.includes(status)) throw new HttpError(400, 'Выберите статус заявки.');
     if (!['submitted', 'processing'].includes(request.status) || request.status === status) {
@@ -1133,10 +1144,12 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
       const url = `/api/dialogues/${dialogueId}/attachments/${id}`;
       return { id, filename, mediaType, size, url, ...(mediaType.startsWith('image/') && { previewUrl: url + '?preview=1' }) };
     });
+    const certificateDelivery = deanWorkflows.messageDelivery(message.id);
     return {
       ...message, mine: Boolean(mine), delivered: Boolean(delivered), read: Boolean(read),
       ...(clientId === null ? {} : { clientId }),
       ...(attachments.length && { attachments }),
+      ...(certificateDelivery && { certificateDelivery }),
     };
   }
 
@@ -1255,6 +1268,9 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     if (scope === 'all' && message.sender_id !== viewer.id) {
       throw new HttpError(403, 'Удалить сообщение у всех может только отправитель.');
     }
+    if (scope === 'all' && deanWorkflows.messageDelivery(messageId)) {
+      throw new HttpError(409, 'Отозвать справку можно в карточке запроса.');
+    }
     if (message.deleted_for_all) return;
     if (scope === 'self') {
       hideMessage.run(messageId, viewer.id);
@@ -1281,8 +1297,7 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     return assignment;
   }
 
-  async function upload(request, viewer, id) {
-    ownedAssignment(viewer, id);
+  async function readDocument(request) {
     const mediaType = request.headers['content-type']?.split(';', 1)[0].trim().toLowerCase();
     if (mediaType !== PDF && mediaType !== DOCX) throw new HttpError(415, 'Прикрепите файл PDF или DOCX.');
     let filename;
@@ -1300,6 +1315,11 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
       throw new HttpError(415, 'Содержимое файла не соответствует формату PDF или DOCX.');
     }
     return { filename, mediaType, contents };
+  }
+
+  function upload(request, viewer, id) {
+    ownedAssignment(viewer, id);
+    return readDocument(request);
   }
 
   function submitWork(viewer, id, { filename, mediaType, contents }) {
@@ -1373,13 +1393,29 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     (favorite ? addFavorite : removeFavorite).run(viewer.id, id);
   }
 
+  const deanWorkflows = createDeanWorkflows(db, {
+    HttpError, text, now, openDialogue: openDirectoryDialogue, sendMessage, createNotice, createHistory,
+  });
+  async function uploadCertificate(request, viewer, id) {
+    deanWorkflows.validateUpload(viewer, id);
+    return { ...await readDocument(request), clientId: request.headers['x-upload-id'] };
+  }
   const routes = [
     ...createPortfolio(db, { HttpError, bytesBody, isPdf, now, text }),
     { method: 'GET', path: /^\/api\/library$/, action: library },
     { method: 'POST', path: /^\/api\/library\/([^/]+)\/favorite$/, action: setFavorite },
     { method: 'GET', path: /^\/api\/cabinet$/, action: cabinet },
+    { method: 'GET', path: /^\/api\/dean\/announcements$/, role: 'dean', action: deanWorkflows.list },
+    { method: 'POST', path: /^\/api\/dean\/announcements$/, role: 'dean', action: deanWorkflows.publish },
     { method: 'POST', path: /^\/api\/requests$/, role: 'student', action: submitRequest },
     { method: 'POST', path: /^\/api\/requests\/([^/]+)\/status$/, role: 'dean', action: changeRequest },
+    { method: 'POST', path: /^\/api\/requests\/([^/]+)\/take$/, role: 'dean', action: deanWorkflows.take },
+    { method: 'POST', path: /^\/api\/requests\/([^/]+)\/file$/, role: 'dean', parse: uploadCertificate, action: deanWorkflows.upload },
+    { method: 'POST', path: /^\/api\/requests\/([^/]+)\/file\/remove$/, role: 'dean', action: deanWorkflows.remove },
+    { method: 'GET', path: /^\/api\/requests\/([^/]+)\/file\/([^/]+)$/, role: 'dean', download: true, action: deanWorkflows.preview },
+    { method: 'POST', path: /^\/api\/requests\/([^/]+)\/send$/, role: 'dean', action: deanWorkflows.send },
+    { method: 'POST', path: /^\/api\/requests\/([^/]+)\/revoke$/, role: 'dean', action: deanWorkflows.revoke },
+    { method: 'GET', path: /^\/api\/requests\/([^/]+)\/deliveries\/([^/]+)\/file$/, download: true, action: deanWorkflows.download },
     { method: 'GET', path: /^\/api\/requests\/([^/]+)\/pdf$/, role: 'student', download: true, action: requestPdf },
     { method: 'GET', path: /^\/api\/requests\/([^/]+)\/print$/, role: 'student', print: true, action: requestPrint },
     { method: 'GET', path: /^\/api\/dialogues\/([^/]+)$/, action: dialogueMessages },
@@ -1441,6 +1477,7 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
       'Content-Type': result.media_type,
       'Content-Disposition': filenameHeader(result.filename, result.inline ? 'inline' : 'attachment'),
       'Content-Length': result.contents.length,
+      'Cache-Control': 'no-store',
       ...(result.sameOrigin && { 'Cross-Origin-Resource-Policy': 'same-origin' }),
     });
     response.end(result.contents);
