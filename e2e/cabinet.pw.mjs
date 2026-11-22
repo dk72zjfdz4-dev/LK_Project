@@ -379,7 +379,7 @@ test('mobile search opens the document form and campus opens the chosen card', a
   await expect(card).toBeHidden();
 });
 
-for (const width of [360, 440, 1440]) {
+for (const width of [360, 393, 440, 1440]) {
   test(`messenger layout, independent drafts and emoji at ${width} px`, async ({ page, cabinet }) => {
     const mobile = width <= 680;
     await page.setViewportSize({ width, height: width === 440 ? 450 : 820 });
@@ -387,8 +387,11 @@ for (const width of [360, 440, 1440]) {
     const launcher = page.locator('#help-launcher');
     const homePosition = await launcher.boundingBox();
     await page.locator('#header-inbox').click();
-    if (mobile) await expect(launcher).toBeHidden();
-    await expect(page.locator('.mobile-header .brand [aria-hidden="true"]')).toHaveText('ЛК');
+    if (mobile) {
+      await expect(launcher).toBeVisible();
+      await expect(page.locator('#dialogues-heading')).toHaveText('Сообщения');
+      await expect(page.locator('.mobile-tabs')).toBeVisible();
+    }
     const search = page.getByRole('searchbox', { name: 'Поиск диалогов' });
     const captureChat = (part) => page.screenshot({ path: `test-results/screenshots/messages-${part}-${width}.png`, animations: 'disabled' });
     await expect(page.locator('#dialogues-content button')).toHaveCount(2);
@@ -403,9 +406,13 @@ for (const width of [360, 440, 1440]) {
     await expect(send).toBeDisabled();
     await expect(send).toHaveCSS('cursor', 'default');
     if (mobile) {
-      const { y, height } = await page.locator('#messaging').boundingBox();
-      const tabs = await page.locator('.mobile-tabs').boundingBox();
-      expect(tabs.y - y - height).toBeCloseTo(6, 0);
+      for (const selector of ['.mobile-tabs', '.app-header', '.page-header', '.app-footer', '#help-launcher']) {
+        await expect(page.locator(selector)).toBeHidden();
+      }
+      const app = await page.locator('#app').boundingBox();
+      const editor = await page.locator('#message-form').boundingBox();
+      expect(editor.y + editor.height).toBeCloseTo(app.y + app.height, 0);
+      await expect(page.locator('.conversation')).toHaveCSS('border-top-width', '0px');
     } else {
       await expect(launcher).toBeInViewport();
       expect(await launcher.boundingBox()).toEqual(homePosition);
@@ -422,12 +429,27 @@ for (const width of [360, 440, 1440]) {
       };
       await page.evaluate(setKeyboardHeight, 440);
       await expect(page.locator('#app')).toHaveCSS('height', '440px');
-      const field = await composer.boundingBox();
-      expect(field.y + field.height).toBeLessThan(440);
+      const header = await page.locator('.conversation-header').boundingBox();
+      const editor = await page.locator('#message-form').boundingBox();
+      expect(header.y).toBe(0);
+      expect(editor.y + editor.height).toBeCloseTo(440, 0);
+      const compactHistory = await page.locator('#messages-content').boundingBox();
       await page.evaluate(setKeyboardHeight, null);
-      await composer.fill('Добрый день! Подскажите, пожалуйста, статус справки.');
+      await expect(page.locator('#app')).toHaveCSS('height', '820px');
+      expect((await page.locator('#messages-content').boundingBox()).height).toBeGreaterThan(compactHistory.height);
+      await composer.fill('Добрый день!');
+      const initial = await composer.boundingBox();
+      await composer.press('Shift+Enter');
+      await composer.press('End');
+      await composer.press('A');
+      expect((await composer.boundingBox()).height).toBeGreaterThan(initial.height);
       await composer.press('Enter');
       await expect(composer).toHaveValue('');
+      await expect(composer).toBeFocused();
+      await composer.fill('Следующее сообщение');
+      await send.click();
+      await expect(composer).toHaveValue('');
+      await expect(composer).toBeFocused();
     }
     await composer.fill('Привет мир');
     await expect(composer).toHaveCSS('outline-style', 'none');
@@ -452,11 +474,20 @@ for (const width of [360, 440, 1440]) {
     await captureChat('thread');
     if (width < 681) {
       await expect(search).toBeHidden();
-      await page.getByRole('button', { name: 'Назад к диалогам' }).click();
+      if (width === 393) {
+        await page.setViewportSize({ width: 640, height: 393 });
+        await expect(composer).toBeInViewport();
+        await expect(page.locator('.mobile-tabs')).toBeHidden();
+        await page.setViewportSize({ width, height: 820 });
+        await page.goBack();
+      } else await page.getByRole('button', { name: 'Назад к диалогам' }).click();
       await expect(search).toHaveValue('дека');
       await expect(search).toBeVisible();
+      await expect(launcher).toBeVisible();
+      await expect(page.locator('#help-dialog')).toBeHidden();
       await contact.click();
       await expect(composer).toHaveValue('П🙂ривет мир');
+      await page.getByRole('button', { name: 'Назад к диалогам' }).click();
       await page.locator('.mobile-tabs').getByRole('link', { name: 'Главная', exact: true }).click();
       await expect(launcher).toBeVisible();
     } else {
@@ -484,6 +515,76 @@ for (const width of [360, 440, 1440]) {
     }
   });
 }
+
+test('mobile conversation keeps the history and dialogue list independently scrollable', async ({ browser, cabinet }) => {
+  const context = await browser.newContext({ viewport: { width: 393, height: 720 }, isMobile: true, hasTouch: true });
+  try {
+    const page = await context.newPage();
+    const fullName = 'Александра Константиновна Волконская-Рождественская';
+    let targetId;
+    await page.route('**/api/cabinet', async (route) => {
+      const response = await route.fetch();
+      const data = await response.json();
+      const original = data.dialogues[0];
+      targetId = original.id;
+      const target = { ...original, title: fullName, fullName, contact: undefined, studentProfile: undefined, unreadCount: 1 };
+      const rows = Array.from({ length: 18 }, (_, index) => ({
+        ...target, id: 20000 + index, title: 'Собеседник ' + index, fullName: 'Собеседник ' + index,
+      }));
+      data.dialogues = [...rows.slice(0, 10), target, ...rows.slice(10)];
+      await route.fulfill({ response, json: data });
+    });
+    await page.route('**/api/dialogues/*', async (route) => {
+      const response = await route.fetch();
+      const data = await response.json();
+      if (!data.messages?.length) return route.fulfill({ response, json: data });
+      const original = data.messages[0];
+      data.messages = Array.from({ length: 28 }, (_, index) => ({
+        ...original, id: 21000 + index, text: 'Тестовое сообщение ' + index, mine: index % 2 === 0,
+        delivered: true, read: true,
+      }));
+      await route.fulfill({ response, json: data });
+    });
+    await login(page, cabinet);
+    await page.locator('.mobile-tabs [data-view=messages]').click();
+    const list = page.locator('#dialogues-content');
+    const filter = page.locator('#dialogue-filter');
+    await filter.selectOption('unread');
+    await expect(list.locator('button')).toHaveCount(19);
+    await list.evaluate((node) => { node.scrollTop = 540; });
+    const scroll = await list.evaluate((node) => node.scrollTop);
+    expect(scroll).toBeGreaterThan(0);
+    const launcher = page.locator('#help-launcher');
+    await launcher.click();
+    await expect(page.locator('#help-dialog')).toBeVisible();
+    await page.getByRole('button', { name: 'Закрыть помощника' }).click();
+    await page.locator('#dialogue-' + targetId).click();
+    const history = page.locator('#messages-content');
+    await expect(history.locator('.message')).toHaveCount(28);
+    await expect(page.locator('#dialogue-heading')).toHaveText(fullName);
+    const header = page.locator('.conversation-header');
+    const menu = header.getByText('Контакты', { exact: true });
+    await header.getByLabel('Контакты').click();
+    await expect(page.locator('#dialogue-contact')).toContainText(fullName);
+    await expect(menu).toBeHidden();
+    await header.getByLabel('Контакты').click();
+    await history.evaluate((node) => { node.scrollTop = 140; });
+    const historyTop = await history.evaluate((node) => node.scrollTop);
+    await page.setViewportSize({ width: 820, height: 393 });
+    await expect(page.locator('.mobile-tabs')).toBeHidden();
+    await expect(page.locator('#message-text')).toBeInViewport();
+    expect(await history.evaluate((node) => node.scrollTop)).toBe(historyTop);
+    expect(await page.evaluate(() => globalThis.scrollY)).toBe(0);
+    await page.setViewportSize({ width: 393, height: 720 });
+    await page.goBack();
+    await expect(filter).toHaveValue('unread');
+    expect(await list.evaluate((node) => node.scrollTop)).toBe(scroll);
+    await expect(launcher).toBeVisible();
+    await expect(page.locator('#help-dialog')).toBeHidden();
+  } finally {
+    await context.close();
+  }
+});
 
 test('new conversation restores the search and opens a teacher contact', async ({ page, cabinet }) => {
   await login(page, cabinet, 'other');
@@ -801,17 +902,22 @@ for (const width of [360, 440]) {
     await expect(sinistra).toHaveCount(1);
     await sinistra.getByRole('button', { name: 'Написать', exact: true }).click();
     await expect(page.locator('#dialogue-heading')).toHaveText('Аврора Синистра');
+    await page.getByRole('button', { name: 'Назад к диалогам' }).click();
     await menu.click();
     await page.locator('#view-menu').getByRole('link', { name: 'Контакты', exact: true }).click();
     const deanCard = contacts.filter({ has: page.getByRole('heading', { name: 'Деканат', exact: true }) });
     await deanCard.getByRole('button', { name: 'Написать', exact: true }).click();
-    await expect(page.locator('#dialogue-heading')).toHaveText('Деканат');
+    const deanDialogue = (await data('/cabinet')).dialogues.find(({ partnerRole }) => partnerRole === 'dean');
+    await expect(page.locator('#dialogue-heading')).toHaveText(deanDialogue.fullName);
+    await expect(page.locator('#dialogue-role')).toHaveText(deanDialogue.roleLabel);
+    await page.getByRole('button', { name: 'Назад к диалогам' }).click();
     await menu.click();
     await page.locator('#view-menu').getByRole('link', { name: 'Контакты', exact: true }).click();
     await linked.getByRole('button', { name: 'Написать', exact: true }).click();
     await expect(page.locator('#dialogue-heading')).toHaveText(teacher.name);
     expect((await data('/cabinet')).dialogues.filter(({ fullName }) => fullName === teacher.name)).toHaveLength(1);
 
+    await page.getByRole('button', { name: 'Назад к диалогам' }).click();
     await menu.click();
     await expandGroup(page.locator('#mobile-nav'), 'Учёба');
     await page.locator('#view-menu').getByRole('link', { name: 'Успеваемость', exact: true }).click();

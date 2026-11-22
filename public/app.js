@@ -95,6 +95,7 @@ const messageForm = byId('message-form');
 const emojiOptions = byId('emoji-options');
 const emojiToggle = byId('emoji-toggle');
 const mobileLayout = window.matchMedia('(max-width: 680px)');
+const mobileMessenger = window.matchMedia('(max-width: 680px), (orientation: landscape) and (max-height: 500px) and (any-pointer: coarse)');
 
 function element(tag, className, content) {
   const node = document.createElement(tag);
@@ -129,7 +130,7 @@ function route(focusHeading = false) {
     openHelp(targetId);
     return;
   }
-  const active = permitted.includes(requested) && (requested !== 'menu' || mobileLayout.matches) ? requested : 'home';
+  const active = permitted.includes(requested) && (requested !== 'menu' || mobileMessenger.matches) ? requested : 'home';
   if (requested !== 'help' && helpDialog.open) {
     helpNavigationClose = true;
     helpDialog.close();
@@ -139,6 +140,7 @@ function route(focusHeading = false) {
   if (active !== 'campus') closeCampusCard();
   pendingTarget = active === requested && targetId ? targetId : undefined;
   activeView = active;
+  if (active === 'messages' && !targetId && selectedDialogue !== undefined && mobileMessenger.matches) closeDialogue();
   byId('app-error').textContent = '';
   for (const name of Object.keys(views)) {
     byId('view-' + name).hidden = active !== name;
@@ -169,7 +171,7 @@ function route(focusHeading = false) {
   if (active === 'profile') loadPortfolio();
   heading.classList.toggle('pointer-navigation', pointerNavigation);
   pointerNavigation = false;
-  if (focusHeading || pendingTarget) {
+  if ((focusHeading || pendingTarget) && !(active === 'messages' && mobileMessenger.matches)) {
     window.scrollTo(0, active === 'menu' ? (menuItem ? history.state.menuScroll : menuScroll) : 0);
     const previousLink = menuItem && byId('mobile-nav').querySelector('[data-view="' + CSS.escape(menuItem) + '"]');
     (previousLink || heading).focus({ preventScroll: true });
@@ -185,7 +187,7 @@ function revealTarget() {
     const dialogue = cabinet?.dialogues.find(({ id }) => 'dialogue-' + id === pendingTarget);
     if (!dialogue) return;
     pendingTarget = undefined;
-    setNewDialogueMode(!dialogue.lastAt);
+    if (!mobileMessenger.matches || !history.state?.messengerThread) setNewDialogueMode(!dialogue.lastAt);
     if (!dialogue.lastAt) {
       byId('dialogue-category').value = dialogue.partnerRole;
       refreshDialogueList();
@@ -2422,7 +2424,7 @@ function refreshDialogueList() {
   modeButton.setAttribute('aria-label', modeLabel);
   modeButton.querySelector('path').setAttribute('d', newDialogueMode ? 'M19 12H5m7-7-7 7 7 7' : 'M12 5v14M5 12h14');
   byId('dialogue-new-tooltip').textContent = modeLabel;
-  byId('dialogues-heading').textContent = newDialogueMode ? 'Новая переписка' : 'Диалоги';
+  byId('dialogues-heading').textContent = newDialogueMode ? 'Новая переписка' : mobileMessenger.matches ? 'Сообщения' : 'Диалоги';
   byId('dialogue-search').placeholder = newDialogueMode ? 'Поиск контактов' : 'Поиск диалогов';
   byId('dialogue-filter').hidden = newDialogueMode;
   byId('dialogue-category').hidden = !newDialogueMode;
@@ -2483,6 +2485,12 @@ function renderDialogues([dialogues, directory]) {
 }
 
 function openDialogue(item, pointer) {
+  if (mobileMessenger.matches && !history.state?.messengerThread) {
+    const hash = '#messages/dialogue-' + item.id;
+    if (window.location.hash !== '#messages') history.replaceState(history.state, '', '#messages');
+    history.pushState({ messengerThread: true }, '', hash);
+    pageHash = hash;
+  }
   const list = byId('dialogues-content');
   if (list.getClientRects().length) dialogueListScroll = list.scrollTop;
   const heading = byId('dialogue-heading');
@@ -2492,7 +2500,7 @@ function openDialogue(item, pointer) {
     helpDialog.close();
   }
   if (selectedDialogue === item.id) {
-    byId('dialogue-heading').focus();
+    heading.focus({ preventScroll: true });
     refreshDialogue();
     return;
   }
@@ -2506,16 +2514,16 @@ function openDialogue(item, pointer) {
   for (const button of list.querySelectorAll('button')) {
     button.setAttribute('aria-pressed', String(button.id === 'dialogue-' + item.id));
   }
-  byId('dialogue-heading').textContent = dialogueName(item);
+  byId('dialogue-heading').textContent = mobileMessenger.matches ? item.fullName ?? item.title : dialogueName(item);
   byId('dialogue-heading').title = item.fullName ?? item.title;
-  byId('dialogue-heading').focus();
+  byId('dialogue-heading').focus({ preventScroll: true });
   byId('dialogue-error').textContent = '';
   renderDialogueContact(item);
   sizeMessaging();
   composingMessage = false;
-  syncComposer();
   setEmojiPanel(false);
   messageForm.hidden = false;
+  syncComposer();
   byId('messages-content').replaceChildren(element('p', 'empty-state', 'Загружаем переписку…'));
   renderedMessages.clear();
   renders.delete('messages');
@@ -2532,6 +2540,7 @@ function closeDialogue() {
   dialogueLoad = undefined;
   receivedMessages = [];
   byId('messaging').classList.remove('has-dialogue');
+  sizeMessaging();
   byId('dialogue-heading').textContent = 'Переписка';
   byId('dialogue-heading').removeAttribute('title');
   for (const field of ['dialogue-avatar', 'dialogue-role', 'dialogue-error']) byId(field).textContent = '';
@@ -2599,6 +2608,13 @@ function messageActions(item) {
   details.addEventListener('toggle', () => {
     if (!details.open) return;
     for (const other of document.querySelectorAll('.message-actions[open]')) if (other !== details) other.open = false;
+    if (mobileMessenger.matches) {
+      const pane = byId('messages-content').getBoundingClientRect();
+      const trigger = summary.getBoundingClientRect();
+      const above = trigger.top - pane.top;
+      const below = pane.bottom - trigger.bottom;
+      details.classList.toggle('message-actions-below', above < actions.offsetHeight && below > above);
+    }
     actions.scrollIntoView({ block: 'nearest' });
   });
   details.addEventListener('keydown', (event) => {
@@ -2647,7 +2663,8 @@ function renderDialogueMessages(messages, content) {
       label.append(sentAt);
       if (receipt) label.append(receipt);
       const actions = messageActions(item);
-      message.append(element('p', 'record-copy', item.text), label, actions);
+      label.append(actions);
+      message.append(element('p', 'record-copy', item.text), label);
       row.append(message);
       entry = { row, receipt, deleteForAll: actions.querySelector('[data-scope="all"]') };
       renderedMessages.set(item.id, entry);
@@ -2973,7 +2990,10 @@ byId('dialogue-category').addEventListener('change', () => {
   byId('dialogue-start-error').textContent = '';
   refreshDialogueList();
 });
-byId('dialogue-back').addEventListener('click', closeDialogue);
+byId('dialogue-back').addEventListener('click', () => {
+  if (history.state?.messengerThread) history.back();
+  else closeDialogue();
+});
 byId('dialogue-new').addEventListener('click', () => setNewDialogueMode(!newDialogueMode));
 byId('messages-new').addEventListener('click', scrollConversationEnd);
 byId('messages-content').addEventListener('scroll', () => {
@@ -2982,6 +3002,9 @@ byId('messages-content').addEventListener('scroll', () => {
 });
 document.addEventListener('visibilitychange', acknowledgeMessages);
 messageForm.addEventListener('submit', sendMessage);
+byId('message-submit').addEventListener('pointerdown', (event) => {
+  if (mobileMessenger.matches && document.activeElement === messageText) event.preventDefault();
+});
 messageText.addEventListener('keydown', handleMessageKey);
 messageText.addEventListener('input', updateDraft);
 messageText.addEventListener('compositionstart', () => { composingMessage = true; });
@@ -3068,7 +3091,12 @@ function navigateFromLink(hash, event) {
       history.replaceState(null, '', window.location.pathname + window.location.search + pageHash);
     }
   }
-  if (window.location.hash === hash || (!window.location.hash && hash === '#home')) route(true);
+  if (mobileMessenger.matches && hash.startsWith('#messages/dialogue-') && !history.state?.messengerThread) {
+    if (window.location.hash !== '#messages') history.pushState(null, '', '#messages');
+    history.pushState({ messengerThread: true }, '', hash);
+    clearSearch();
+    route(true);
+  } else if (window.location.hash === hash || (!window.location.hash && hash === '#home')) route(true);
   else window.location.hash = hash;
 }
 
@@ -3083,7 +3111,7 @@ document.addEventListener('click', (event) => {
     history.back();
     return;
   }
-  if (mobileLayout.matches && activeView === 'menu' && link.closest('#mobile-nav')) {
+  if (mobileMessenger.matches && activeView === 'menu' && link.closest('#mobile-nav')) {
     const section = link.dataset.view;
     menuScroll = window.scrollY;
     history.replaceState({ menuItem: section, menuScroll }, '');
@@ -3115,14 +3143,18 @@ helpDialog.addEventListener('close', () => {
 });
 function sizeMessaging() {
   const viewport = window.visualViewport;
-  if (!viewport) return;
   const shell = byId('app');
-  if (window.innerHeight - viewport.height > 80 && viewport.scale === 1) {
+  if (mobileMessenger.matches && activeView === 'messages' && selectedDialogue !== undefined && viewport?.scale === 1) {
+    const content = byId('messages-content');
+    const atEnd = atConversationEnd(content);
     shell.style.setProperty('--messenger-viewport-height', viewport.height + 'px');
-    shell.style.setProperty('--messenger-nav-space', '0px');
+    shell.style.setProperty('--messenger-viewport-top', viewport.offsetTop + 'px');
+    shell.classList.toggle('messenger-keyboard', window.innerHeight - viewport.height > 1);
+    if (atEnd) content.scrollTop = content.scrollHeight;
   } else {
     shell.style.removeProperty('--messenger-viewport-height');
-    shell.style.removeProperty('--messenger-nav-space');
+    shell.style.removeProperty('--messenger-viewport-top');
+    shell.classList.remove('messenger-keyboard');
   }
 }
 
@@ -3130,7 +3162,19 @@ window.visualViewport?.addEventListener('resize', () => {
   sizeHelpDialog();
   sizeMessaging();
 });
-window.visualViewport?.addEventListener('scroll', sizeHelpDialog);
+window.visualViewport?.addEventListener('scroll', () => {
+  sizeHelpDialog();
+  sizeMessaging();
+});
+window.addEventListener('resize', sizeMessaging);
+mobileMessenger.addEventListener('change', () => {
+  if (profile && window.location.hash === '#menu') route(true);
+  if (activeView !== 'messages') return;
+  refreshDialogueList();
+  const item = cabinet?.dialogues.find(({ id }) => id === selectedDialogue);
+  if (item) byId('dialogue-heading').textContent = mobileMessenger.matches ? item.fullName ?? item.title : dialogueName(item);
+  sizeMessaging();
+});
 byId('library-retry').addEventListener('click', loadLibrary);
 byId('portfolio-refresh').addEventListener('click', () => loadPortfolio({ fresh: true }));
 byId('library-filters').addEventListener('submit', (event) => event.preventDefault());
@@ -3342,7 +3386,6 @@ new ResizeObserver(([{ contentRect: { width } }]) => {
 
 mobileLayout.addEventListener('change', () => {
   renderHomeWeekLabel();
-  if (profile && window.location.hash === '#menu') route(true);
 });
 
 // Route changes restore the menu position explicitly after switching views.
