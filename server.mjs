@@ -284,13 +284,13 @@ function weekInMoscow() {
 }
 
 function lessonOn(row, date, cancellation) {
-  const unchangedNovemberDay = date >= '2026-11-03' && date <= '2026-11-19';
+  const scheduledChange = date >= '2026-11-23' && date <= '2026-11-29' ? row.change : null;
   return {
     id: `${row.id}-${date}`, date,
     start: row.start_time, end: row.end_time,
     title: row.title, room: row.room, teacher: row.teacher,
-    change: unchangedNovemberDay ? null : cancellation ?? row.change,
-    cancelled: !unchangedNovemberDay && Boolean(cancellation),
+    change: cancellation ?? scheduledChange,
+    cancelled: Boolean(cancellation),
     contact: cabinet.lessonContact(row.student_id, row),
   };
 }

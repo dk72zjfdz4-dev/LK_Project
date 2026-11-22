@@ -286,6 +286,13 @@ for (const width of [360, 1440]) {
     await expect(page.locator('#month-day .change-label')).toHaveText('Занятие отменено.');
     await month.selectOption('2026-12');
     await expect(grid.locator('.month-cell')).toHaveCount(31);
+    await expect(grid.locator('.month-changed')).toHaveCount(0);
+    const schoolSaturday = grid.getByRole('button', { name: /, 12 декабря,.*занятий: 2/ }).locator('..');
+    const freeSaturday = grid.getByRole('button', { name: /, 5 декабря,.*занятий: 0/ }).locator('..');
+    const schoolFriday = grid.getByRole('button', { name: /, 11 декабря,/ }).locator('..');
+    const schoolBackground = await schoolFriday.evaluate((cell) => globalThis.getComputedStyle(cell).backgroundColor);
+    await expect(schoolSaturday).toHaveCSS('background-color', schoolBackground);
+    await expect(freeSaturday).not.toHaveCSS('background-color', schoolBackground);
     await expect(page.locator('#week-grid')).toBeHidden();
     await fits(page);
     await page.screenshot({ path: `test-results/screenshots/schedule-month-${width}.png`, animations: 'disabled' });

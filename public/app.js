@@ -629,7 +629,7 @@ function renderMonth({ month, today, lessons }) {
     const entries = lessons.filter((lesson) => lesson.date === date);
     const hasChanges = entries.some(({ change, cancelled }) => change || cancelled);
     const cell = element('div', 'month-cell');
-    if (weekday >= 5) cell.classList.add('month-weekend');
+    if (weekday >= 5 && !entries.length) cell.classList.add('month-weekend');
     if (date === today) cell.classList.add('calendar-today');
     if (hasChanges) cell.classList.add('month-changed');
     const button = element('button', 'month-day-choice');
