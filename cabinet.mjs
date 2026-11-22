@@ -339,6 +339,29 @@ const libraryBooks = [
   ['Практика защитных чар', 'Виктор Вересин', 'Защита от тёмных искусств', 'Разбор вымышленных учебных ситуаций.'],
 ].map(([title, author, subject, description], index) => ({ id: index + 1, title, author, subject, description }));
 
+function seedEvenLessons(db, schedule) {
+  const student = db.prepare("SELECT id FROM students WHERE login = ? AND role = 'student'");
+  const markOdd = db.prepare(`
+    INSERT INTO lesson_week_parity (lesson_id, parity)
+    SELECT id, 1 FROM lessons WHERE student_id = ? AND weekday = ? AND start_time = ?
+  `);
+  const insert = db.prepare(`
+    INSERT INTO lessons (student_id, weekday, start_time, end_time, title, room, teacher, change)
+    VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+  `);
+  const markEven = db.prepare('INSERT INTO lesson_week_parity (lesson_id, parity) VALUES (?, 0)');
+  for (const [login, entries] of schedule) {
+    const account = student.get(login);
+    if (!account) continue;
+    for (const [weekday, start, end, subject, room, replacedStart = start] of entries) {
+      const [title, teacher] = subjects[subject];
+      markOdd.run(account.id, weekday, replacedStart);
+      const { lastInsertRowid } = insert.run(account.id, weekday, start, end, title, room, teacher);
+      markEven.run(lastInsertRowid);
+    }
+  }
+}
+
 export function seedCabinet(db) {
   const version = db.prepare('PRAGMA user_version').get().user_version;
   if (version < 2) seedCabinetFixtures(db);
@@ -453,7 +476,7 @@ export function seedCabinet(db) {
     db.exec('PRAGMA user_version = 13');
   }
   if (version < 14) {
-    const evenSchedule = [
+    seedEvenLessons(db, [
       ['student1', [
         [1, '10:40', '12:00', 3, 'В-304'],
         [5, '10:40', '12:00', 2, 'Б-312'],
@@ -466,28 +489,23 @@ export function seedCabinet(db) {
         [6, '09:00', '10:20', 3, 'В-304'],
         [6, '10:40', '12:00', 2, 'Б-312'],
       ]],
-    ];
-    const student = db.prepare("SELECT id FROM students WHERE login = ? AND role = 'student'");
-    const markOdd = db.prepare(`
-      INSERT INTO lesson_week_parity (lesson_id, parity)
-      SELECT id, 1 FROM lessons WHERE student_id = ? AND weekday = ? AND start_time = ?
-    `);
-    const insert = db.prepare(`
-      INSERT INTO lessons (student_id, weekday, start_time, end_time, title, room, teacher, change)
-      VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
-    `);
-    const markEven = db.prepare('INSERT INTO lesson_week_parity (lesson_id, parity) VALUES (?, 0)');
-    for (const [login, entries] of evenSchedule) {
-      const account = student.get(login);
-      if (!account) continue;
-      for (const [weekday, start, end, subject, room] of entries) {
-        const [title, teacher] = subjects[subject];
-        markOdd.run(account.id, weekday, start);
-        const { lastInsertRowid } = insert.run(account.id, weekday, start, end, title, room, teacher);
-        markEven.run(lastInsertRowid);
-      }
-    }
+    ]);
     db.exec('PRAGMA user_version = 14');
+  }
+  if (version < 15) {
+    seedEvenLessons(db, [
+      ['student1', [
+        [2, '14:10', '15:30', 1, 'А-205', '12:30'],
+        [3, '12:30', '13:50', 4, 'Б-226', '09:00'],
+        [4, '09:00', '10:20', 2, 'Б-312', '12:30'],
+      ]],
+      ['student2', [
+        [1, '14:10', '15:30', 4, 'Б-226', '12:30'],
+        [3, '09:00', '10:20', 5, 'А-418', '12:30'],
+        [4, '12:30', '13:50', 1, 'А-205', '09:00'],
+      ]],
+    ]);
+    db.exec('PRAGMA user_version = 15');
   }
 }
 

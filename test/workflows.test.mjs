@@ -392,7 +392,7 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   assert.equal(studentDirectory.length, 8);
   assert.ok(studentDirectory.every(({ roleLabel, studentProfile }) => roleLabel === 'Студент' && studentProfile === undefined));
   const migrated = new DatabaseSync(env.DB_PATH, { readOnly: true });
-  assert.equal(migrated.prepare('PRAGMA user_version').get().user_version, 14);
+  assert.equal(migrated.prepare('PRAGMA user_version').get().user_version, 15);
   assert.deepEqual(migrated.prepare('SELECT student_group FROM portfolio_dean_groups').all().map(({ student_group }) => student_group), ['ГР-24-02']);
   migrated.close();
   const peer = studentDirectory.find(({ title }) => title === 'Крош Андреевич Речин');

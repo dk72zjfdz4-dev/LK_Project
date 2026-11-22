@@ -131,7 +131,11 @@ test('student accounts, schedule ownership and session revocation', { timeout: 2
     assert.deepEqual(saturday.map(({ start }) => start), ['09:00', '10:40']);
     assert.deepEqual(saturday.map(({ id }) => id), novemberLessons.filter(({ date }) => date === '2026-11-28').map(({ id }) => id));
     assert.equal(odd.some(({ date }) => date === '2026-11-21'), false);
-    assert.notDeepEqual(odd.map(({ title }) => title), even.filter(({ date }) => date < '2026-11-28').map(({ title }) => title));
+    const pairs = (week, day) => week.filter(({ date }) => date === `2026-11-${day}`).map(({ start, title }) => [start, title]);
+    for (let weekday = 0; weekday < 5; weekday++) {
+      assert.notDeepEqual(pairs(odd, 16 + weekday), pairs(even, 23 + weekday));
+      assert.deepEqual(pairs(even, 23 + weekday), pairs(novemberLessons, 23 + weekday));
+    }
     const saturdayId = saturday[0].id;
     assert.equal((await request('/api/lessons/' + saturdayId, { cookie })).status, 200);
     assert.equal((await request('/api/lessons/' + saturdayId.replace(/2026-11-28$/, '2026-11-21'), { cookie })).status, 404);
