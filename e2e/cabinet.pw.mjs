@@ -330,7 +330,7 @@ test('teacher login and role-specific navigation', async ({ page, cabinet }) => 
 });
 
 for (const width of [360, 1440]) {
-  test(`teacher schedule, journal and attachments at ${width} px`, async ({ page, cabinet }) => {
+  test(`teacher schedule, journal and attachments at ${width} px`, async ({ page, browser, cabinet }) => {
     await page.setViewportSize({ width, height: 820 });
     await login(page, cabinet, 'teacher');
     const json = async (path) => (await page.request.get(cabinet.origin + path)).json();
@@ -338,6 +338,12 @@ for (const width of [360, 1440]) {
     const { lessons } = await json('/api/teacher/schedule');
     const lesson = lessons.find(({ status }) => status === 'scheduled');
     expect(lesson).toBeDefined();
+    await expect(page.locator('#home-week-label')).not.toHaveText('');
+    await page.locator('#home-week label').filter({ has: page.locator('input[value="' + lesson.date + '"]') }).click();
+    await expect(page.locator('#home-day')).toContainText(lesson.group);
+    await page.locator('#home-day').getByRole('button', { name: lesson.title }).first().click();
+    await expect(page.getByRole('button', { name: 'Выставить баллы' })).toBeVisible();
+    await page.locator('#lesson-close').click();
     if (width === 360) await page.locator('.mobile-tabs [data-view=schedule]').click();
     else {
       const nav = page.locator('.sidebar nav');
@@ -345,6 +351,7 @@ for (const width of [360, 1440]) {
       await nav.getByRole('link', { name: 'Расписание', exact: true }).click();
     }
     const getLesson = () => page.locator('#lesson-' + lesson.id);
+    if (width === 360) await page.locator('#day-picker label').filter({ has: page.locator('input[value="' + lesson.date + '"]') }).click();
     await expect(getLesson()).toContainText(lesson.group);
     await getLesson().getByRole('button', { name: lesson.title }).click();
     await page.getByRole('button', { name: 'Выставить баллы' }).click();
@@ -366,24 +373,58 @@ for (const width of [360, 1440]) {
     await expect(page.getByText('Опубликовано: 0', { exact: true })).toBeVisible();
     await fits(page);
     await navigate('#schedule');
+    if (width === 360) await page.locator('#day-picker label').filter({ has: page.locator('input[value="' + lesson.date + '"]') }).click();
     await getLesson().getByRole('button', { name: lesson.title }).click();
     await page.getByRole('button', { name: 'Перенести', exact: true }).click();
-    if (width === 1440) {
-      const nextWeek = new Date(lesson.date + 'T00:00:00Z');
-      nextWeek.setUTCDate(nextWeek.getUTCDate() + 7);
-      await page.getByLabel('Новая дата').fill(nextWeek.toISOString().slice(0, 10));
-    }
+    const futureDay = new Date(lesson.date + 'T00:00:00Z');
+    futureDay.setUTCDate(futureDay.getUTCDate() + 14);
+    await page.getByLabel('Новая дата').fill(futureDay.toISOString().slice(0, 10));
     await page.getByLabel('Начало', { exact: true }).fill(width === 360 ? '21:00' : '22:00');
     await page.getByLabel('Окончание', { exact: true }).fill(width === 360 ? '21:30' : '22:30');
     await page.getByLabel('Комментарий для студентов').fill('Демонстрационный перенос');
     await expect(page.getByText(/Было:.*Новый слот:/)).toBeVisible();
+    const studentContext = width === 1440 ? await browser.newContext({ viewport: { width: 393, height: 820 } }) : null;
+    const studentPage = await studentContext?.newPage();
+    if (studentPage) await login(studentPage, cabinet, lesson.group.startsWith('ГР') ? 'student' : 'other');
     await page.getByRole('button', { name: 'Подтвердить перенос' }).click();
     await expect(getLesson()).toContainText('Перенесено');
+    if (studentPage) {
+      await studentPage.evaluate(() => globalThis.document.dispatchEvent(new Event('visibilitychange')));
+      await expect(studentPage.locator('#changed-lessons')).toContainText('Демонстрационный перенос');
+      await studentPage.locator('.mobile-tabs [data-view=schedule]').click();
+      await studentPage.getByRole('button', { name: 'Месяц', exact: true }).click();
+      const movedDate = futureDay.toISOString().slice(0, 10);
+      await studentPage.locator('#schedule-month').selectOption(movedDate.slice(0, 7));
+      const choice = studentPage.locator('#month-grid button[data-date="' + movedDate + '"]');
+      await choice.click();
+      await expect(studentPage.locator('#month-day')).toContainText('Демонстрационный перенос');
+    }
+    await navigate('#home');
+    await expect(page.locator('#changed-lessons')).toContainText('Демонстрационный перенос');
+    await expect(page.locator('#home-day')).toContainText('Демонстрационный перенос');
+    if (width === 1440) {
+      const fresh = await page.context().newPage();
+      try {
+        await fresh.goto(cabinet.origin);
+        await expect(fresh.locator('#changed-lessons')).toContainText('Демонстрационный перенос');
+      } finally {
+        await fresh.close();
+      }
+    }
+    await navigate('#schedule');
     await getLesson().getByRole('button', { name: lesson.title }).click();
     await page.getByRole('button', { name: 'Отменить занятие' }).click();
     await expect(page.getByText(/Отменяется.*Группа:/)).toBeVisible();
     await page.getByRole('button', { name: 'Подтвердить отмену' }).click();
     await expect(getLesson()).toContainText('Отменено');
+    if (studentPage) {
+      await studentPage.evaluate(() => globalThis.document.dispatchEvent(new Event('visibilitychange')));
+      await expect(studentPage.locator('#month-day')).toContainText('Отменено');
+      await studentContext.close();
+    }
+    await page.getByRole('button', { name: 'Месяц', exact: true }).click();
+    await expect(page.locator('#month-grid .lesson-link').first()).toBeAttached();
+    await page.getByRole('button', { name: 'Неделя', exact: true }).click();
     await navigate(journalHash);
     await expect(page.getByText('Опубликовано: 0', { exact: true })).toBeVisible();
     const scored = page.locator('.teacher-score-row').first();
@@ -404,6 +445,10 @@ for (const width of [360, 1440]) {
     const actualDate = (await json('/api/teacher/journal/' + lesson.id)).lesson.date;
     await dateFilter.click();
     const calendar = page.locator('.journal-calendar');
+    await expect(calendar).toBeVisible();
+    await page.locator('#page-heading').click();
+    await expect(calendar).toBeHidden();
+    await dateFilter.click();
     const day = calendar.locator('[data-date="' + actualDate + '"]');
     await expect(calendar).toHaveAttribute('data-month', /\d{4}-\d{2}/);
     const month = await calendar.getAttribute('data-month');
@@ -434,10 +479,10 @@ for (const width of [360, 1440]) {
     await filteredLesson.click();
     await expect(draft).toHaveValue('2');
     await expect(page.locator('.teacher-score-row')).toHaveCount(2);
-    await page.getByRole('link', { name: /К занятиям/ }).click();
+    await page.getByRole('link', { name: 'Назад к занятиям' }).click();
     await expect(filteredLesson).toBeVisible();
     await page.getByRole('button', { name: 'Сбросить фильтры' }).click();
-    await expect(dateFilter).toHaveText('Любая дата');
+    await expect(dateFilter).toHaveText('Дата');
     await expect(facultyFilter).toHaveValue('');
     await expect(page.getByText('Выберите дату занятия или факультет.')).toBeVisible();
     await navigate('#contacts');

@@ -344,6 +344,7 @@ function schedule(studentId, week = null) {
     today, weekStart,
     lessons: weekLessons(studentId, rows, monday, 0, cancellations),
     nextWeekLessons: weekLessons(studentId, rows, monday, 7, cancellations),
+    upcomingChanges: teacher.changedStudentLessons(studentId, today, '9999-12-31', [], (id) => lessonById(studentId, id)),
   };
   if (selectedMonday) {
     const nextMonday = new Date(monday);

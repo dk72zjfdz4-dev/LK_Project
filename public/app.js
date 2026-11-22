@@ -50,7 +50,8 @@ const scheduleAreas = [
 let profile;
 let signingOut = false;
 let activeView;
-let teacherSchedule;
+let teacherLessons = [];
+let teacherMonthLessons = [];
 let teacherViewLoad;
 const teacherJournalFilters = { date: '', faculty: '' };
 let schedule;
@@ -164,7 +165,9 @@ function route(focusHeading = false) {
   const heading = byId('page-heading');
   const menuBack = byId('mobile-menu-back');
   const menuItem = active === 'menu' && !menuBack.hidden ? history.state?.menuItem : undefined;
-  menuBack.hidden = history.state?.fromMenu !== active;
+  const journalBack = byId('journal-back');
+  journalBack.hidden = active !== 'grades' || profile.role !== 'teacher' || !targetId?.startsWith('journal-');
+  menuBack.hidden = !journalBack.hidden || history.state?.fromMenu !== active;
   heading.textContent = views[active];
   byId('header-inbox').hidden = active !== 'home';
   document.title = views[active] + ' — Личный кабинет';
@@ -224,7 +227,9 @@ function preservePagePosition(update) {
 }
 
 function showLogin(message = '', focusHeading = false) {
-  teacherSchedule = teacherViewLoad = undefined;
+  teacherViewLoad = undefined;
+  teacherLessons = [];
+  teacherMonthLessons = [];
   teacherJournalFilters.date = teacherJournalFilters.faculty = '';
   closeLesson(false);
   monthScheduleLoad = selectedMonth = undefined;
@@ -324,11 +329,6 @@ function showLogin(message = '', focusHeading = false) {
 
 function showApp(account, focusHeading = false) {
   profile = { ...account, role: account.role || 'student' };
-  byId('teacher-schedule').hidden = profile.role !== 'teacher';
-  if (profile.role === 'teacher') {
-    byId('week-status').hidden = true;
-    byId('week-schedule').hidden = true;
-  }
   for (const [id, field] of Object.entries(profileFields)) {
     const fieldNode = byId(id);
     fieldNode.textContent = account[field] ?? '';
@@ -357,11 +357,11 @@ function showApp(account, focusHeading = false) {
   byId('login-screen').hidden = true;
   byId('app').hidden = false;
   route(focusHeading);
-  if (profile.role === 'student') loadSchedule();
+  if (profile.role !== 'dean') loadSchedule();
   loadCabinet();
   pollTimer = window.setInterval(() => {
     if (document.hidden || signingOut) return;
-    if (profile.role === 'student') loadSchedule({ quiet: true });
+    if (profile.role !== 'dean') loadSchedule({ quiet: true });
     loadCabinet({ quiet: true });
     if (activeView === 'messages' && selectedDialogue !== undefined) refreshDialogue(true);
     if (activeView === 'profile') loadPortfolio({ quiet: true });
@@ -458,7 +458,7 @@ async function openLesson(id, trigger) {
   if (!dialog.open) dialog.showModal();
   try {
     const { lesson } = profile.role === 'teacher'
-      ? { lesson: teacherSchedule.lessons.find((item) => item.id === id) }
+      ? { lesson: [...teacherLessons, ...teacherMonthLessons].find((item) => item.id === id) }
       : await request(resource('/api/lessons', id));
     if (!dialog.open || lessonOpen !== load || profile !== load.account) return;
     byId('lesson-dialog-heading').textContent = lesson.title;
@@ -510,7 +510,7 @@ function lessonOrder(first, second) {
   return first.date.localeCompare(second.date) || first.start.localeCompare(second.start);
 }
 
-function renderHome(lessons, nextWeekLessons, today) {
+function renderHome(lessons, nextWeekLessons, today, upcomingChanges = []) {
   const now = moscowTimeFormat.format(new Date());
   const upcoming = [...lessons, ...nextWeekLessons]
     .filter((lesson) => !lesson.cancelled && (lesson.date > today || (lesson.date === today && lesson.end > now)))
@@ -521,7 +521,9 @@ function renderHome(lessons, nextWeekLessons, today) {
   );
   const changed = [...lessons, ...nextWeekLessons]
     .filter((lesson) => lesson.date >= today && (lesson.change || lesson.cancelled))
-    .sort(lessonOrder);
+  const listed = new Set(changed.map(({ id }) => id));
+  changed.push(...upcomingChanges.filter(({ id }) => !listed.has(id)));
+  changed.sort(lessonOrder);
   renderList(
     byId('changed-lessons'), changed, (lesson) => changeRow(lesson, today),
     'Предстоящих изменений нет.',
@@ -546,6 +548,7 @@ function selectHomeDay(date) {
   renderList(contents, lessons, (lesson) => {
     const row = element('li', 'home-day-row');
     row.append(element('p', 'lesson-time', lessonTimes(lesson)), lessonTitle(lesson, 'h4'), lessonDetails(lesson));
+    if (lesson.status === 'moved' || lesson.status === 'cancelled') row.classList.add('calendar-changed');
     if (lesson.cancelled) row.classList.add('calendar-cancelled');
     if (lessonChange(lesson)) row.append(element('p', 'change-label', lessonChange(lesson)));
     return row;
@@ -576,6 +579,7 @@ function calendarDay(date, day, today, lessons, cardPrefix = 'lesson-') {
     );
     if (lesson.cancelled) card.classList.add('calendar-cancelled');
     if (lessonChange(lesson)) card.append(element('p', 'change-label', lessonChange(lesson)));
+    else if (lesson.status === 'scheduled') card.append(element('p', 'muted', 'Запланировано'));
     return card;
   }, 'Нет занятий');
   return column;
@@ -637,11 +641,11 @@ function renderWeek(lessons, today, start) {
     const homeLabel = label.cloneNode(true);
     const homeInput = homeLabel.querySelector('input');
     homeInput.name = 'home-visible-day';
-    homeInput.setAttribute('aria-label', dayName + ', занятий: ' + count);
+    homeInput.setAttribute('aria-label', dayName + ', занятий: ' + count + (hasChanges ? ', есть изменения' : ''));
     homeInput.setAttribute('aria-controls', 'home-day');
     if (isoDate === today) homeInput.setAttribute('aria-current', 'date');
     const homeChip = homeLabel.querySelector('.day-chip');
-    homeChip.className = 'mini-day';
+    homeChip.className = 'mini-day' + (hasChanges ? ' mini-day-changed' : '');
     homeChip.append(element('span', 'mini-day-count', count ? String(count) : '—'));
     homeWeek.append(homeLabel);
   }
@@ -664,7 +668,7 @@ function setScheduleMode(monthly) {
   loadMonthSchedule();
 }
 
-function renderMonth({ month, today, lessons }) {
+function renderMonth({ month, today, lessons }, selectedDate) {
   const grid = byId('month-grid');
   const first = dateAt(month + '-01');
   const days = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
@@ -683,6 +687,7 @@ function renderMonth({ month, today, lessons }) {
     if (hasChanges) cell.classList.add('month-changed');
     const button = element('button', 'month-day-choice');
     button.type = 'button';
+    button.dataset.date = date;
     button.setAttribute('aria-label', dayFormat.format(dateAt(date)) + ', занятий: ' + entries.length
       + (hasChanges ? ', есть изменения' : ''));
     button.setAttribute('aria-pressed', 'false');
@@ -717,30 +722,46 @@ function renderMonth({ month, today, lessons }) {
   }
   grid.replaceChildren(...cells);
   if (window.matchMedia('(max-width: 960px)').matches) {
-    (dayButtons.find(({ date }) => date === today) ?? dayButtons[0]).select();
+    (dayButtons.find(({ date }) => date === selectedDate) ?? dayButtons.find(({ date }) => date === today) ?? dayButtons[0]).select();
   }
 }
 
-async function loadMonthSchedule() {
+async function loadMonthSchedule({ quiet = false } = {}) {
   const account = profile;
+  if (quiet && monthScheduleLoad) return;
   const month = byId('schedule-month').value;
+  const grid = byId('month-grid');
+  const selectedDate = quiet ? grid.querySelector('[aria-pressed="true"]')?.dataset.date : undefined;
   selectedMonth = month;
   const load = {};
   monthScheduleLoad = load;
   const current = () => profile === account && monthScheduleLoad === load;
   const status = byId('month-schedule-status');
   const retry = byId('month-schedule-retry');
-  retry.hidden = true;
-  byId('month-grid').replaceChildren();
-  byId('month-day').replaceChildren();
-  status.textContent = 'Загружаем расписание…';
+  if (!quiet) {
+    retry.hidden = true;
+    grid.replaceChildren();
+    byId('month-day').replaceChildren();
+    status.textContent = 'Загружаем расписание…';
+  }
   try {
-    const data = await request('/api/schedule?month=' + encodeURIComponent(month));
+    const data = account.role === 'teacher'
+      ? await loadTeacherMonth(month)
+      : await request('/api/schedule?month=' + encodeURIComponent(month));
     if (!current()) return;
-    renderMonth(data);
+    if (account.role === 'teacher') teacherMonthLessons = data.lessons;
+    const key = JSON.stringify(data);
+    if (!quiet || renders.get('schedule-month') !== key) {
+      const update = () => renderMonth(data, selectedDate);
+      if (quiet) preservePagePosition(update);
+      else update();
+      renders.set('schedule-month', key);
+    }
     status.textContent = '';
+    retry.hidden = true;
   } catch (error) {
     if (!current() || endSession(error)) return;
+    if (quiet) return;
     status.textContent = error.message;
     retry.hidden = false;
   } finally {
@@ -782,8 +803,10 @@ async function loadSchedule({ quiet = false, week } = {}) {
   else if (!quiet || !schedule) showScheduleStatus('Загружаем расписание…');
   try {
     const path = '/api/schedule' + (selected ? '?week=' + encodeURIComponent(selected) : '');
-    const { today, weekStart, lessons, nextWeekLessons = [], selectedWeek } = await request(path);
+    const data = student.role === 'teacher' ? await loadTeacherWeeks(selected) : await request(path);
     if (!current()) return;
+    const { today, weekStart, lessons, nextWeekLessons = [], selectedWeek, upcomingChanges = [] } = data;
+    if (student.role === 'teacher') teacherLessons = [...lessons, ...nextWeekLessons, ...(selectedWeek?.lessons ?? []), ...upcomingChanges];
     lessons.sort(lessonOrder);
     const visibleWeek = selectedWeek?.weekStart ?? weekStart;
     const visibleLessons = selectedWeek ? selectedWeek.lessons.sort(lessonOrder) : lessons;
@@ -802,9 +825,9 @@ async function loadSchedule({ quiet = false, week } = {}) {
       }
       const now = moscowTimeFormat.format(new Date());
       const ended = lessons.filter((lesson) => lesson.date === today && !lesson.cancelled && lesson.end <= now).length;
-      const homeKey = JSON.stringify([today, weekStart, lessons, nextWeekLessons, ended]);
+      const homeKey = JSON.stringify([today, weekStart, lessons, nextWeekLessons, upcomingChanges, ended]);
       if (renders.get('schedule-home') !== homeKey) {
-        renderHome(lessons, nextWeekLessons, today);
+        renderHome(lessons, nextWeekLessons, today, upcomingChanges);
         renders.set('schedule-home', homeKey);
       }
       showScheduleStatus();
@@ -812,6 +835,7 @@ async function loadSchedule({ quiet = false, week } = {}) {
     };
     if (quiet || browsing) preservePagePosition(update);
     else update();
+    if (quiet && activeView === 'schedule' && !byId('schedule-month-view').hidden) void loadMonthSchedule({ quiet: true });
     revealTarget();
   } catch (error) {
     if (!current()) return;
@@ -1388,52 +1412,54 @@ function teacherFeedback(output, error) {
   if (!endSession(error)) output.textContent = error.message;
 }
 
-async function loadTeacherView(view, target, week) {
-  if (!['schedule', 'grades', 'contacts'].includes(view)) return;
-  const content = byId({ schedule: 'teacher-schedule', grades: 'grades-content', contacts: 'contacts-content' }[view]);
+async function loadTeacherView(view, target) {
+  if (!['grades', 'contacts'].includes(view)) return;
+  const content = byId({ grades: 'grades-content', contacts: 'contacts-content' }[view]);
   const load = { account: profile };
   teacherViewLoad = load;
   const current = () => teacherViewLoad === load && profile === load.account && activeView === view;
   const id = target?.startsWith('journal-') ? target.slice(8) : undefined;
-  const path = view === 'schedule' ? '/api/teacher/schedule' + (week ? '?week=' + encodeURIComponent(week) : '')
-    : view === 'contacts' ? '/api/teacher/contacts' : id ? resource('/api/teacher/journal', id) : '/api/teacher/journal';
+  const path = view === 'contacts' ? '/api/teacher/contacts' : id ? resource('/api/teacher/journal', id) : '/api/teacher/journal';
   content.replaceChildren(element('p', 'muted', 'Загрузка…'));
   try {
     const data = await request(path);
     if (!current()) return;
-    if (view === 'schedule') {
-      teacherSchedule = data;
-      content.replaceChildren(renderTeacherSchedule(data));
-    } else if (view === 'contacts') content.replaceChildren(renderTeacherContacts(data));
+    if (view === 'contacts') content.replaceChildren(renderTeacherContacts(data));
     else content.replaceChildren(...(id ? [renderTeacherJournal(data)] : renderTeacherJournalIndex(data)));
   } catch (error) {
     if (!current() || endSession(error)) return;
     content.replaceChildren(element('p', 'local-error', error.message),
-      actionButton('Повторить', () => loadTeacherView(view, target, week)));
+      actionButton('Повторить', () => loadTeacherView(view, target)));
   }
 }
 
-function renderTeacherSchedule({ weekStart, lessons }) {
-  const dates = weekDates(weekStart);
-  const heading = element('div', 'teacher-toolbar');
-  const step = (offset) => {
-    const day = dateAt(weekStart);
-    day.setUTCDate(day.getUTCDate() + offset);
-    loadTeacherView('schedule', undefined, day.toISOString().slice(0, 10));
-  };
-  heading.append(actionButton('‹', () => step(-7)), element('strong', '', dateFormat.formatRange(dates[0], dates.at(-1))),
-    actionButton('›', () => step(7)));
-  heading.firstElementChild.setAttribute('aria-label', 'Предыдущая неделя');
-  heading.lastElementChild.setAttribute('aria-label', 'Следующая неделя');
-  const body = element('div', 'cabinet-layout');
-  body.append(heading, listFor(lessons, (lesson) => {
-    const row = element('article', 'teacher-lesson' + (lessonChange(lesson) ? ' calendar-changed' : ''));
-    row.id = 'lesson-' + lesson.id;
-    row.append(lessonTitle(lesson, 'h3'), element('p', 'lesson-time', eventTime(lesson.date) + ' · ' + lessonTimes(lesson)),
-      lessonDetails(lesson), element('p', lessonChange(lesson) ? 'change-label' : 'muted', lessonChange(lesson) || 'Запланировано'));
-    return row;
-  }, 'На этой неделе назначенных занятий нет.'));
-  return panel('Мои занятия', body);
+async function teacherWeekData(week) {
+  const data = await request('/api/teacher/schedule' + (week ? '?week=' + encodeURIComponent(week) : ''));
+  return { ...data, lessons: data.lessons.map((lesson) => ({ ...lesson, cancelled: lesson.status === 'cancelled' })) };
+}
+
+async function loadTeacherWeeks(selected) {
+  const current = await teacherWeekData();
+  const next = dateAt(current.weekStart);
+  next.setUTCDate(next.getUTCDate() + 7);
+  const nextWeek = next.toISOString().slice(0, 10);
+  const [upcoming, other] = await Promise.all([
+    teacherWeekData(nextWeek),
+    selected && selected !== current.weekStart && selected !== nextWeek ? teacherWeekData(selected) : undefined,
+  ]);
+  return { ...current, nextWeekLessons: upcoming.lessons, selectedWeek: selected === nextWeek ? upcoming : other };
+}
+
+async function loadTeacherMonth(month) {
+  const start = dateAt(month + '-01');
+  const week = new Date(start);
+  week.setUTCDate(week.getUTCDate() - (week.getUTCDay() + 6) % 7);
+  const fetches = [];
+  for (; week < start || week.toISOString().startsWith(month); week.setUTCDate(week.getUTCDate() + 7)) {
+    fetches.push(teacherWeekData(week.toISOString().slice(0, 10)));
+  }
+  const weeks = await Promise.all(fetches);
+  return { month, today: weeks[0].today, lessons: weeks.flatMap(({ lessons }) => lessons).filter(({ date }) => date.startsWith(month)) };
 }
 
 function teacherLessonActions(lesson, load) {
@@ -1491,11 +1517,20 @@ function teacherLessonActions(lesson, load) {
         });
         if (profile !== load.account) return;
         if (lessonOpen === load) closeLesson(false);
-        if (activeView === 'schedule') {
+        if (activeView === 'schedule' || activeView === 'home') {
           const week = dateAt(updated.date);
           week.setUTCDate(week.getUTCDate() - (week.getUTCDay() + 6) % 7);
-          await loadTeacherView('schedule', undefined, week.toISOString().slice(0, 10));
-          byId('lesson-' + updated.id)?.querySelector('.lesson-link')?.focus({ preventScroll: true });
+          selectedDay = selectedHomeDay = updated.date;
+          await loadSchedule({ week: week.toISOString().slice(0, 10) });
+          if (activeView === 'schedule' && !byId('schedule-month-view').hidden) {
+            const month = byId('schedule-month');
+            const updatedMonth = updated.date.slice(0, 7);
+            if ([...month.options].some(({ value }) => value === updatedMonth)) month.value = updatedMonth;
+            await loadMonthSchedule();
+          }
+          const shown = activeView === 'home' ? byId('home-day') : byId('view-schedule');
+          const card = byId('lesson-' + updated.id);
+          if (card && shown.contains(card)) card.querySelector('.lesson-link')?.focus({ preventScroll: true });
         }
         byId('action-status').textContent = action === 'move' ? 'Занятие перенесено.' : 'Занятие отменено.';
       } catch (failure) {
@@ -1550,7 +1585,6 @@ function renderTeacherContacts({ groups, contacts }) {
 
 function teacherDatePicker(dates, onChange) {
   const picker = element('details', 'journal-date-picker');
-  const label = element('span', '', 'Дата занятия');
   const trigger = element('summary', 'button button-secondary');
   const calendar = element('div', 'journal-calendar');
   const caption = element('strong');
@@ -1568,11 +1602,9 @@ function teacherDatePicker(dates, onChange) {
   header.append(prev, caption, next);
   calendar.append(header, grid);
   picker.append(trigger, calendar);
-  const field = element('div', 'teacher-field');
-  field.append(label, picker);
   function syncLabel() {
     const selected = teacherJournalFilters.date;
-    trigger.textContent = selected ? dayFormat.format(dateAt(selected)) : 'Любая дата';
+    trigger.textContent = selected ? dayFormat.format(dateAt(selected)) : 'Дата';
     trigger.setAttribute('aria-label', 'Дата занятия: ' + trigger.textContent);
   }
   function step(offset) {
@@ -1620,7 +1652,7 @@ function teacherDatePicker(dates, onChange) {
     trigger.addEventListener('click', (event) => event.preventDefault());
   }
   syncLabel();
-  return { field, clear() { picker.open = false; syncLabel(); } };
+  return { picker, clear() { picker.open = false; syncLabel(); } };
 }
 
 function renderTeacherJournalIndex({ lessons, recent }) {
@@ -1629,8 +1661,8 @@ function renderTeacherJournalIndex({ lessons, recent }) {
   const dates = [...new Set(lessons.map(({ date }) => date))].sort();
   if (!dates.includes(teacherJournalFilters.date)) teacherJournalFilters.date = '';
   const picker = teacherDatePicker(dates, updateResults);
-  const faculty = element('label', 'teacher-field', 'Факультет');
-  const select = element('select');
+  const faculty = element('span', 'journal-faculty-control');
+  const select = element('select', 'journal-faculty');
   select.setAttribute('aria-label', 'Факультет');
   const faculties = [...new Set(lessons.map((lesson) => lesson.faculty).filter(Boolean))].sort();
   for (const value of ['', ...faculties]) {
@@ -1651,7 +1683,7 @@ function renderTeacherJournalIndex({ lessons, recent }) {
     updateResults();
   });
   controls.classList.add('journal-filters');
-  controls.append(picker.field, faculty, reset);
+  controls.append(picker.picker, faculty, reset);
   function updateResults() {
     const { date, faculty } = teacherJournalFilters;
     if (!date && !faculty) {
@@ -1887,8 +1919,7 @@ function renderTeacherJournal({ lesson, work, maxPoints, rows }) {
       refreshSummary();
     }
   });
-  const back = anchor('#grades', 'button button-secondary journal-back', '← К занятиям');
-  wrapper.append(back, meta, form);
+  wrapper.append(meta, form);
   return panel('Выставить баллы', wrapper);
 }
 
@@ -3769,6 +3800,8 @@ function navigateFromLink(hash, event) {
 }
 
 document.addEventListener('click', (event) => {
+  const datePicker = document.querySelector('.journal-date-picker[open]');
+  if (datePicker && !datePicker.contains(event.target)) datePicker.open = false;
   for (const actions of document.querySelectorAll('.message-actions[open]')) {
     if (!actions.contains(event.target)) actions.open = false;
   }
@@ -3936,7 +3969,7 @@ window.addEventListener('focus', syncLoginTheme);
 document.addEventListener('visibilitychange', () => {
   syncLoginTheme();
   if (document.hidden || !profile || signingOut) return;
-  if (profile.role === 'student') loadSchedule({ quiet: true });
+  if (profile.role !== 'dean') loadSchedule({ quiet: true });
   loadCabinet({ quiet: true });
   if (activeView === 'messages' && selectedDialogue !== undefined) refreshDialogue(true);
   if (activeView === 'profile') loadPortfolio({ quiet: true });
@@ -4023,7 +4056,10 @@ for (const button of document.querySelectorAll('.nav-toggle')) {
   });
 }
 
-byId('day-picker').addEventListener('change', (event) => selectDay(event.target.value));
+byId('day-picker').addEventListener('change', (event) => {
+  selectDay(event.target.value);
+  if (profile.role === 'teacher') selectHomeDay(event.target.value);
+});
 byId('schedule-week-mode').addEventListener('click', () => setScheduleMode(false));
 byId('schedule-month-mode').addEventListener('click', () => setScheduleMode(true));
 byId('schedule-month').addEventListener('change', loadMonthSchedule);
@@ -4032,7 +4068,10 @@ byId('month-schedule-retry').addEventListener('click', loadMonthSchedule);
 byId('home-changes-toggle').addEventListener('click', ({ currentTarget }) => {
   currentTarget.ariaExpanded = String(currentTarget.ariaExpanded !== 'true');
 });
-byId('home-week').addEventListener('change', (event) => selectHomeDay(event.target.value));
+byId('home-week').addEventListener('change', (event) => {
+  selectHomeDay(event.target.value);
+  if (profile.role === 'teacher') selectDay(event.target.value);
+});
 for (const button of document.querySelectorAll('[data-week-step]')) {
   button.addEventListener('click', () => {
     if (!schedule || scheduleLoad?.browsing) return;

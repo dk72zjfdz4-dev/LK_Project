@@ -364,6 +364,7 @@ a { color: var(--primary); }
 .home-day-heading { color: var(--muted); font-size: .85rem; font-weight: 650; }
 .home-day-heading::first-letter { text-transform: uppercase; }
 .home-day-row { padding: 8px 0; }
+.home-day-row.calendar-changed { padding-inline: 8px; }
 .home-day-row + .home-day-row { border-top: 1px solid var(--border); }
 .home-day-row .lesson-details { display: flex; flex-wrap: wrap; column-gap: 9px; }
 
@@ -935,6 +936,7 @@ a { color: var(--primary); }
 
 .mini-day strong { font-size: .95rem; }
 .mini-day:hover, #home-week input[aria-current] + .mini-day { border-color: #92cbbe; background: var(--mint); color: var(--primary-hover); }
+#home-week input + .mini-day-changed { background: var(--peach); color: #75410f; }
 #home-week input:checked + .mini-day { border-color: var(--primary); background: var(--primary); color: white; }
 #home-week input:checked + .mini-day .mini-day-count { color: inherit; }
 #home-week input:focus-visible + .mini-day { outline: 3px solid var(--focus); outline-offset: 2px; }
@@ -1490,11 +1492,35 @@ details[open] > .record-summary::before { transform: rotate(45deg); }
 
 .teacher-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .teacher-toolbar .button { min-height: 44px; }
-.journal-filters { align-items: end; }
+.journal-filters { align-items: center; margin-block-start: 10px; }
 .journal-date-picker { position: relative; }
 .journal-date-picker > summary { list-style: none; cursor: pointer; }
 .journal-date-picker > summary::-webkit-details-marker { display: none; }
-.journal-date-picker > summary::after { content: '⌄'; margin-inline-start: .65em; }
+.journal-date-picker > summary, .journal-faculty-control { position: relative; }
+.journal-date-picker > summary, .journal-faculty { padding-inline-end: 36px; }
+.journal-date-picker > summary::after, .journal-faculty-control::after {
+  position: absolute;
+  inset: 50% 15px auto auto;
+  width: 7px;
+  height: 7px;
+  border-inline-end: 1.5px solid currentColor;
+  border-block-end: 1.5px solid currentColor;
+  transform: translateY(-75%) rotate(45deg);
+  pointer-events: none;
+  content: '';
+}
+.journal-faculty {
+  appearance: none;
+  min-height: 44px;
+  padding-inline-start: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--surface);
+  color: var(--primary);
+  font-weight: 650;
+}
+.journal-faculty:focus { outline: none; }
+.journal-faculty:focus-visible { border-color: var(--primary); }
 .journal-calendar {
   position: absolute;
   z-index: 4;
@@ -1509,15 +1535,32 @@ details[open] > .record-summary::before { transform: rotate(45deg); }
 .journal-calendar-header { display: flex; justify-content: space-between; align-items: center; gap: 4px; margin-bottom: 6px; }
 .journal-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; text-align: center; }
 .journal-calendar-grid .button { min-height: 34px; padding: 3px 0; }
+.journal-calendar-grid .button:enabled { background: #e5effb; }
 .journal-calendar-grid .button[aria-pressed="true"] { color: white; background: var(--primary); }
-.journal-back { justify-self: start; text-decoration: none; }
+.page-header:has(.journal-back:not([hidden])) { justify-content: flex-start; gap: 6px; }
+.journal-back {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  color: var(--primary);
+}
+.journal-back svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 .teacher-field { display: grid; gap: 4px; min-width: 0; font-weight: 600; }
 .teacher-field :is(input, textarea, select) {
   width: 100%; min-height: 44px; padding: 7px 10px;
   border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--ink);
 }
 .teacher-field input[type="number"] { width: min(100%, 180px); font-size: 1rem; }
-.teacher-lesson, .teacher-contact, .teacher-score-row { display: grid; gap: 6px; padding: 10px; }
+.teacher-contact, .teacher-score-row { display: grid; gap: 6px; padding: 10px; }
 .teacher-change-form, .teacher-journal { max-width: none; }
 .teacher-score-row .button { justify-self: start; }
 .calendar-changed { border-inline-start: 3px solid #b96619; background-color: var(--peach); }

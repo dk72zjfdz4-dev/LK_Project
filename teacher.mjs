@@ -278,7 +278,12 @@ export function createTeacherWorkflows(db, { transaction, HttpError, civilDate, 
       const owned = findLesson(teacherId, id, rows);
       if (owned) lessons.set(id, owned.lesson);
     }
-    return { today, weekStart, lessons: [...lessons.values()].sort(compareSlots) };
+    const data = { today, weekStart, lessons: [...lessons.values()].sort(compareSlots) };
+    if (week === null) {
+      data.upcomingChanges = changedLessons.all(teacherId, today, '9999-12-31')
+        .map(({ id }) => findLesson(teacherId, id, rows)?.lesson).filter(Boolean).sort(compareSlots);
+    }
+    return data;
   }
 
   function changedStudentLessons(studentId, from, to, lessons, projectOriginal) {
