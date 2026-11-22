@@ -91,6 +91,13 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   assert.equal((await expect('/library', other)).books[0].favorite, false);
   assert.ok(initial.contacts.length);
   assert.ok(initial.contacts.every(({ email }) => email.endsWith('@example.com')));
+  const sinistra = initial.contacts.filter(({ name }) => name === 'Аврора Синистра');
+  assert.equal(sinistra.length, 1);
+  const minerva = initial.contacts.filter(({ name }) => name === 'Минерва Макгонагалл');
+  assert.equal(minerva.length, 1);
+  assert.equal(sinistra[0].teacherId, null);
+  const office = initial.contacts.find(({ role }) => role === 'dean');
+  assert.equal(office.email, 'dean-office@example.com');
   const search = (query, cookie) => expect('/search?q=' + encodeURIComponent(query), cookie);
   await expect('/help', null, undefined, 401);
   const { documents, faq } = await expect('/help', student);
@@ -123,6 +130,12 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   assert.ok(initial.notifications.some(({ title }) => /отменено/i.test(title)));
   assert.ok(!(await cabinet(other)).notifications.some(({ title }) => /отменено/i.test(title)));
   const schedule = await expect('/schedule', student);
+  const officeChat = await expect('/dialogues/contact/' + office.partnerId, student, {});
+  assert.equal(officeChat.dialogueId, initial.dialogues.find(({ partnerRole }) => partnerRole === 'dean').id);
+  await expect('/dialogues/teacher/' + sinistra[0].partnerId, student, {}, 404);
+  const catalogueChat = await expect('/dialogues/contact/' + sinistra[0].partnerId, student, {});
+  assert.ok((await cabinet(student)).dialogues.some(({ id }) => id === catalogueChat.dialogueId));
+  assert.ok(schedule.lessons.some(({ contact }) => contact?.id === minerva[0].id && contact.partnerId === minerva[0].partnerId));
   const registered = initial.contacts.find((contact) => Number.isSafeInteger(contact.teacherId));
   assert.ok(registered);
   assert.ok(schedule.lessons.some(({ contact }) => contact?.teacherId === registered.teacherId));

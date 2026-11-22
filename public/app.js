@@ -1271,17 +1271,20 @@ function contactCard(contact, { withId = false, canMessage = false, studentProfi
   mailOptions.append(anchor(mailto, 'inline-link', 'Почтовое приложение'));
   mail.append(mailSummary, mailOptions);
   const studentMessaging = canMessage && profile.role === 'student';
+  const recipient = contact.teacherId
+    ? resource('/api/dialogues/teacher', contact.teacherId)
+    : contact.partnerId && resource('/api/dialogues/contact', contact.partnerId);
   const errorOutput = element('p', 'local-error');
   errorOutput.setAttribute('role', 'alert');
-  if (studentMessaging && contact.teacherId) {
+  if (studentMessaging && recipient) {
     const write = element('button', 'button button-secondary', 'Написать');
     write.type = 'button';
-    write.addEventListener('click', (event) => startDialogue(resource('/api/dialogues/teacher', contact.teacherId), write, errorOutput, event));
+    write.addEventListener('click', (event) => startDialogue(recipient, write, errorOutput, event));
     actions.append(write);
   }
   actions.append(copy, mail);
   card.append(element('p', 'muted', 'Демо-адрес'), address, actions, status, errorOutput);
-  if (studentMessaging && !contact.teacherId) {
+  if (studentMessaging && !recipient) {
     card.append(element('p', 'muted', 'Для этого преподавателя переписка в кабинете недоступна. Можно открыть почту.'));
   }
   return card;
@@ -1317,7 +1320,11 @@ async function startDialogue(path, button, errorOutput, event) {
 }
 
 function renderContacts(contacts) {
-  return [panel('Преподаватели', listFor(contacts, (contact) => contactCard(contact, { withId: true, canMessage: true }), 'Доступных контактов пока нет.'))];
+  const card = (contact) => contactCard(contact, { withId: true, canMessage: true });
+  const sections = [panel('Преподаватели', listFor(contacts.filter(({ role }) => role !== 'dean'), card, 'Доступных контактов пока нет.'))];
+  const offices = contacts.filter(({ role }) => role === 'dean');
+  if (offices.length) sections.push(panel('Службы университета', listFor(offices, card)));
+  return sections;
 }
 
 function renderDialogueContact(item) {

@@ -763,8 +763,17 @@ for (const width of [360, 440]) {
     await page.locator('#view-menu').getByRole('link', { name: 'Контакты', exact: true }).click();
     const contacts = page.locator('#contacts-content .contact-card');
     const linked = contacts.filter({ has: page.getByRole('heading', { name: teacher.name, exact: true }) });
-    await expect(contacts.filter({ hasText: 'переписка в кабинете недоступна' }).first()
-      .getByRole('button', { name: 'Написать', exact: true })).toHaveCount(0);
+    const sinistra = contacts.filter({ has: page.getByRole('heading', { name: 'Аврора Синистра', exact: true }) });
+    await expect(sinistra).toHaveCount(1);
+    await sinistra.getByRole('button', { name: 'Написать', exact: true }).click();
+    await expect(page.locator('#dialogue-heading')).toHaveText('Аврора Синистра');
+    await menu.click();
+    await page.locator('#view-menu').getByRole('link', { name: 'Контакты', exact: true }).click();
+    const deanCard = contacts.filter({ has: page.getByRole('heading', { name: 'Деканат', exact: true }) });
+    await deanCard.getByRole('button', { name: 'Написать', exact: true }).click();
+    await expect(page.locator('#dialogue-heading')).toHaveText('Деканат');
+    await menu.click();
+    await page.locator('#view-menu').getByRole('link', { name: 'Контакты', exact: true }).click();
     await linked.getByRole('button', { name: 'Написать', exact: true }).click();
     await expect(page.locator('#dialogue-heading')).toHaveText(teacher.name);
     expect((await data('/cabinet')).dialogues.filter(({ fullName }) => fullName === teacher.name)).toHaveLength(1);

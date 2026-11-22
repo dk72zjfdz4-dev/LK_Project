@@ -31,12 +31,14 @@ function teacherContact({ id: teacherId, login, name }) {
   return { ...(demo ?? { id, name, email: `${id}@example.com` }), teacherId };
 }
 
+function deanContact(partnerId) {
+  return { id: `dean-${partnerId}`, name: 'Деканат', email: 'dean-office@example.com', teacherId: null, partnerId, role: 'dean' };
+}
+
 function dialogueContact(dialogue, viewerRole, teacherLogin) {
   const { partnerId, partnerRole, fullName } = dialogue;
   if (partnerRole === 'teacher') return teacherContact({ id: partnerId, login: teacherLogin, name: fullName });
-  if (partnerRole === 'dean') {
-    return { id: `dean-${partnerId}`, name: 'Деканат', email: 'dean-office@example.com', teacherId: null };
-  }
+  if (partnerRole === 'dean') return deanContact(partnerId);
   if (partnerRole === 'student' && (viewerRole === 'teacher' || viewerRole === 'dean')) {
     const id = `student-${partnerId}`;
     return { id, name: fullName, email: `${id}@example.com`, teacherId: null };
@@ -726,10 +728,12 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
   `);
   const directoryDialogue = prepare('SELECT id FROM dialogues WHERE student_id = ? AND staff_id = ?');
   const lessonContacts = prepare('SELECT DISTINCT title, teacher FROM lessons WHERE student_id = ?');
-  const enrolledLessonTeacher = prepare(`
-    SELECT staff.id, staff.login, staff.full_name AS name
-    FROM enrollments e JOIN students staff ON staff.id = e.teacher_id
-    WHERE e.student_id = ? AND e.subject = ? AND e.semester = ? AND staff.role = 'teacher' AND staff.full_name = ?
+  const lessonTeacher = prepare(`
+    SELECT staff.id, staff.login, staff.full_name AS name, EXISTS (
+      SELECT 1 FROM enrollments e WHERE e.teacher_id = staff.id
+        AND e.student_id = ? AND e.subject = ? AND e.semester = ?
+    ) AS assigned
+    FROM students staff WHERE staff.role = 'teacher' AND staff.full_name = ?
       AND NOT EXISTS (
         SELECT 1 FROM students peer WHERE peer.role = 'teacher' AND peer.full_name = staff.full_name AND peer.id <> staff.id
       )
@@ -890,8 +894,10 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
   }
 
   function lessonContact(studentId, { title, teacher }) {
-    const staff = enrolledLessonTeacher.get(studentId, title, currentSemester, teacher);
-    return staff ? teacherContact(staff) : demoContact(teacher);
+    const staff = lessonTeacher.get(studentId, title, currentSemester, teacher);
+    if (!staff) return demoContact(teacher);
+    const contact = teacherContact(staff);
+    return staff.assigned ? contact : { ...contact, teacherId: null, partnerId: staff.id };
   }
 
   function contacts(viewer) {
@@ -903,6 +909,10 @@ export function createCabinet(db, { transaction, HttpError, bytesBody, jsonBody,
     }
     for (const staff of teacherContacts.all({ studentId: viewer.id })) {
       const contact = teacherContact(staff);
+      byId.set(contact.id, contact);
+    }
+    for (const { id } of dean.all()) {
+      const contact = deanContact(id);
       byId.set(contact.id, contact);
     }
     return [...byId.values()].sort((first, second) => first.name.localeCompare(second.name, 'ru'));
