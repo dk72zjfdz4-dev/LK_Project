@@ -1,4 +1,5 @@
 .mobile-tabs,
+.mobile-menu-back.button,
 .mobile-menu-page,
 .mobile-profile-logout {
   display: none;
@@ -75,6 +76,18 @@
   }
 
   .mobile-avatar { flex: 0 0 44px; text-decoration: none; }
+
+  .page-header:has(.mobile-menu-back:not([hidden])) { justify-content: flex-start; gap: 8px; }
+  .page-header:has(.mobile-menu-back:not([hidden])) h1 { flex: 1; min-width: 0; }
+  .mobile-menu-back.button {
+    display: grid;
+    place-items: center;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border-radius: 10px;
+  }
 
   .messaging {
     grid-template-columns: minmax(0, 1fr);

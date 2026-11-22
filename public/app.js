@@ -156,6 +156,9 @@ function route(focusHeading = false) {
   if (group) openNavGroups.add(group.dataset.navGroup);
   renderNavGroups();
   const heading = byId('page-heading');
+  const menuBack = byId('mobile-menu-back');
+  const menuItem = active === 'menu' && !menuBack.hidden ? history.state?.menuItem : undefined;
+  menuBack.hidden = history.state?.fromMenu !== active;
   heading.textContent = views[active];
   byId('header-inbox').hidden = active !== 'home';
   document.title = views[active] + ' — Личный кабинет';
@@ -166,8 +169,9 @@ function route(focusHeading = false) {
   heading.classList.toggle('pointer-navigation', pointerNavigation);
   pointerNavigation = false;
   if (focusHeading || pendingTarget) {
-    window.scrollTo(0, active === 'menu' ? menuScroll : 0);
-    heading.focus({ preventScroll: true });
+    window.scrollTo(0, active === 'menu' ? (menuItem ? history.state.menuScroll : menuScroll) : 0);
+    const previousLink = menuItem && byId('mobile-nav').querySelector('[data-view="' + CSS.escape(menuItem) + '"]');
+    (previousLink || heading).focus({ preventScroll: true });
   }
   revealTarget();
   if (requested === 'help') openHelp(targetId);
@@ -3015,9 +3019,23 @@ document.addEventListener('click', (event) => {
   for (const actions of document.querySelectorAll('.message-actions[open]')) {
     if (!actions.contains(event.target)) actions.open = false;
   }
-  const link = event.target.closest('.sidebar a[data-view], .mobile-tabs a, #mobile-nav a, #mobile-avatar, #help-dialog a[href^="#"], #header-inbox');
+  const link = event.target.closest('.sidebar a[data-view], .mobile-tabs a, #mobile-nav a, #mobile-avatar, #mobile-menu-back, #help-dialog a[href^="#"], #header-inbox');
   if (!link || event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
+  if (link.id === 'mobile-menu-back') {
+    history.back();
+    return;
+  }
+  if (mobileLayout.matches && activeView === 'menu' && link.closest('#mobile-nav')) {
+    const section = link.dataset.view;
+    menuScroll = window.scrollY;
+    history.replaceState({ menuItem: section, menuScroll }, '');
+    history.pushState({ fromMenu: section }, '', link.hash);
+    pointerNavigation = event.detail > 0;
+    clearSearch();
+    route(true);
+    return;
+  }
   navigateFromLink(link.hash, event);
 });
 

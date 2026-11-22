@@ -1176,6 +1176,43 @@ test('Chromium loads and applies both responsive stylesheets', async ({ page, ca
   await expect(page.locator('.mobile-tabs')).toBeHidden();
 });
 
+test('mobile menu back restores the original link and scroll position', async ({ page, cabinet }) => {
+  await page.setViewportSize({ width: 360, height: 500 });
+  await login(page, cabinet);
+  const tabs = page.locator('.mobile-tabs');
+  const menu = page.locator('#mobile-nav');
+  const back = page.getByRole('link', { name: 'Назад в меню' });
+  const heading = page.locator('#page-heading');
+  const scroll = () => page.evaluate(() => globalThis.scrollY);
+  await tabs.getByRole('link', { name: 'Расписание' }).click();
+  await expect(heading).toHaveText('Расписание');
+  await expect(back).toBeHidden();
+  await tabs.getByRole('link', { name: 'Меню' }).click();
+  for (const group of ['Учёба', 'Сервисы', 'Кампус']) await expandGroup(menu, group);
+
+  for (const name of ['Расписание', 'Библиотека']) {
+    const source = menu.getByRole('link', { name, exact: true });
+    await source.focus();
+    await page.evaluate(() => globalThis.scrollTo(0, 140));
+    const position = await scroll();
+    expect(position).toBeGreaterThan(0);
+    await source.press('Enter');
+    await expect(heading).toHaveText(name);
+    await expect(back).toBeVisible();
+    await expect(back).toHaveCSS('width', '44px');
+    await back.press('Enter');
+    await expect(heading).toHaveText('Меню');
+    await expect(back).toBeHidden();
+    await expect(source).toBeFocused();
+    expect(await scroll()).toBe(position);
+  }
+  await page.goForward();
+  await expect(heading).toHaveText('Библиотека');
+  await expect(back).toBeVisible();
+  await page.setViewportSize({ width: 768, height: 800 });
+  await expect(back).toBeHidden();
+});
+
 for (const width of [360, 440, 768, 1440]) {
   test(`navigation disclosures and lesson dismissal at ${width} px`, async ({ page, cabinet }) => {
     const mobile = width < 681;
@@ -1217,7 +1254,9 @@ for (const width of [360, 440, 768, 1440]) {
     await expect(nav.getByRole('button', { name: 'Учёба', includeHidden: true })).toHaveAttribute('aria-expanded', 'true');
     await expect(nav.locator('[data-view=schedule]')).toHaveAttribute('aria-current', 'page');
 
-    if (mobile) await page.locator('#day-picker label').first().click();
+    await expect(page.locator('#week-schedule')).toBeVisible();
+    const firstDay = page.locator('#day-picker label').first();
+    if (await firstDay.isVisible()) await firstDay.click();
     const lesson = page.locator('#week-grid .lesson-link:visible').first();
     const dialog = page.locator('#lesson-dialog');
     for (const action of ['button', 'Escape', 'outside']) {
