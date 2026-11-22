@@ -201,4 +201,12 @@ test('teacher lesson changes, journal lifetime, publication ownership and contac
   assert.equal(mixedScores.find((row) => row.studentId === first.studentId).points, 2);
   assert.equal(mixedScores.find((row) => row.studentId === second.studentId).points, 3);
   await write(mixed + '/score', { studentId: second.studentId, action: 'change', points: 8 });
+  await write(mixed + '/score', { studentId: second.studentId, action: 'delete' });
+  const afterDraft = await write(mixed + '/draft', { studentId: second.studentId, points: 0 });
+  assert.equal(afterDraft.rows.find((row) => row.studentId === second.studentId).draft, 0);
+  await write(mixed + '/publish', { clientId: 'replace-deleted' });
+  const replaced = (await get(mixed, teacher)).rows.find((row) => row.studentId === second.studentId);
+  assert.equal(replaced.points, 0);
+  assert.equal(replaced.editableUntil, mixedScores.find((row) => row.studentId === second.studentId).editableUntil);
+  assert.ok(replaced.history.some(({ action, before }) => action === 'delete' && before === 8));
 });

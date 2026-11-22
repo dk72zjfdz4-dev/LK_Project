@@ -391,14 +391,38 @@ for (const width of [360, 1440]) {
     await scored.getByRole('button', { name: 'Сохранить исправление' }).click();
     await expect(scored).toContainText('Опубликовано: 2');
     await scored.getByRole('button', { name: 'Удалить балл' }).click();
-    await expect(scored).toContainText('Балл удалён');
+    await expect(scored).toContainText('Не оценено');
+    await expect(scored.locator('input[type=number]')).toHaveValue('');
+    await scored.getByText('История оценки', { exact: true }).click();
+    await expect(scored.getByText(/Удалено.*2/)).toBeVisible();
     await scored.getByRole('button', { name: 'Восстановить' }).click();
     await expect(scored).toContainText('Опубликовано: 2');
     await navigate('#grades');
-    const dateFilter = page.getByLabel('Дата занятия');
+    const dateFilter = page.locator('.journal-date-picker summary');
     const facultyFilter = page.getByLabel('Факультет', { exact: true });
     await facultyFilter.selectOption(lesson.faculty);
-    await dateFilter.selectOption({ value: (await json('/api/teacher/journal/' + lesson.id)).lesson.date });
+    const actualDate = (await json('/api/teacher/journal/' + lesson.id)).lesson.date;
+    await dateFilter.click();
+    const calendar = page.locator('.journal-calendar');
+    const day = calendar.locator('[data-date="' + actualDate + '"]');
+    await expect(calendar).toHaveAttribute('data-month', /\d{4}-\d{2}/);
+    const month = await calendar.getAttribute('data-month');
+    const nextMonth = calendar.getByRole('button', { name: 'Следующий месяц' });
+    const previousMonth = calendar.getByRole('button', { name: 'Предыдущий месяц' });
+    if (await nextMonth.isEnabled()) {
+      await nextMonth.click();
+      await expect(calendar).not.toHaveAttribute('data-month', month);
+      await previousMonth.click();
+    } else {
+      await previousMonth.click();
+      await expect(calendar).not.toHaveAttribute('data-month', month);
+      await nextMonth.click();
+    }
+    await expect(calendar).toHaveAttribute('data-month', month);
+    if (!(await day.count())) await calendar.getByRole('button', {
+      name: month < actualDate.slice(0, 7) ? 'Следующий месяц' : 'Предыдущий месяц',
+    }).click();
+    await day.click();
     const filteredLesson = page.locator('#grades-content a[href="' + journalHash + '"]').first();
     await expect(filteredLesson).toBeVisible();
     const recent = page.locator('.panel').filter({ has: page.getByRole('heading', { name: 'Недавние изменения' }) });
@@ -407,9 +431,15 @@ for (const width of [360, 1440]) {
     await publication.getByText('Отменить публикацию', { exact: true }).click();
     await publication.getByRole('button', { name: 'Подтвердить отмену публикации' }).click();
     await expect(publication).toHaveJSProperty('open', false);
-    await navigate(journalHash);
+    await filteredLesson.click();
     await expect(draft).toHaveValue('2');
     await expect(page.locator('.teacher-score-row')).toHaveCount(2);
+    await page.getByRole('link', { name: /К занятиям/ }).click();
+    await expect(filteredLesson).toBeVisible();
+    await page.getByRole('button', { name: 'Сбросить фильтры' }).click();
+    await expect(dateFilter).toHaveText('Любая дата');
+    await expect(facultyFilter).toHaveValue('');
+    await expect(page.getByText('Выберите дату занятия или факультет.')).toBeVisible();
     await navigate('#contacts');
     const { contacts } = await json('/api/teacher/contacts');
     const contact = contacts.find(({ role }) => role === 'dean');

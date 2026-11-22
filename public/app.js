@@ -1548,31 +1548,110 @@ function renderTeacherContacts({ groups, contacts }) {
   return panel('Студенты и деканат', body);
 }
 
+function teacherDatePicker(dates, onChange) {
+  const picker = element('details', 'journal-date-picker');
+  const label = element('span', '', 'Дата занятия');
+  const trigger = element('summary', 'button button-secondary');
+  const calendar = element('div', 'journal-calendar');
+  const caption = element('strong');
+  caption.setAttribute('aria-live', 'polite');
+  const grid = element('div', 'journal-calendar-grid');
+  const months = [...new Set(dates.map((date) => date.slice(0, 7)))];
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  let month = teacherJournalFilters.date.slice(0, 7) || (months.includes(currentMonth) ? currentMonth : months.at(-1));
+  const monthName = new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  const prev = actionButton('‹', () => step(-1));
+  const next = actionButton('›', () => step(1));
+  prev.setAttribute('aria-label', 'Предыдущий месяц');
+  next.setAttribute('aria-label', 'Следующий месяц');
+  const header = element('div', 'journal-calendar-header');
+  header.append(prev, caption, next);
+  calendar.append(header, grid);
+  picker.append(trigger, calendar);
+  const field = element('div', 'teacher-field');
+  field.append(label, picker);
+  function syncLabel() {
+    const selected = teacherJournalFilters.date;
+    trigger.textContent = selected ? dayFormat.format(dateAt(selected)) : 'Любая дата';
+    trigger.setAttribute('aria-label', 'Дата занятия: ' + trigger.textContent);
+  }
+  function step(offset) {
+    const position = dateAt(month + '-01');
+    position.setUTCMonth(position.getUTCMonth() + offset);
+    month = position.toISOString().slice(0, 7);
+    render();
+  }
+  function render() {
+    const start = dateAt(month + '-01');
+    calendar.dataset.month = month;
+    const count = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0)).getUTCDate();
+    caption.textContent = monthName.format(start);
+    prev.disabled = month <= months[0];
+    next.disabled = month >= months.at(-1);
+    const cells = shortWeekdays.map((day) => element('span', 'muted', day));
+    for (let pad = (start.getUTCDay() + 6) % 7; pad > 0; pad--) cells.push(element('span'));
+    for (let day = 1; day <= count; day++) {
+      const date = month + '-' + String(day).padStart(2, '0');
+      const button = actionButton(String(day), () => {
+        teacherJournalFilters.date = date;
+        syncLabel();
+        picker.open = false;
+        trigger.focus();
+        onChange();
+      });
+      button.disabled = !dates.includes(date);
+      button.dataset.date = date;
+      button.setAttribute('aria-label', dayFormat.format(dateAt(date)));
+      button.setAttribute('aria-pressed', String(date === teacherJournalFilters.date));
+      cells.push(button);
+    }
+    grid.replaceChildren(...cells);
+  }
+  picker.addEventListener('toggle', () => {
+    if (picker.open && month) render();
+  });
+  picker.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !picker.open) return;
+    picker.open = false;
+    trigger.focus();
+  });
+  if (!month) {
+    trigger.setAttribute('aria-disabled', 'true');
+    trigger.addEventListener('click', (event) => event.preventDefault());
+  }
+  syncLabel();
+  return { field, clear() { picker.open = false; syncLabel(); } };
+}
+
 function renderTeacherJournalIndex({ lessons, recent }) {
   const list = element('div');
   const controls = element('div', 'teacher-toolbar');
-  for (const [key, label, placeholder, format] of [
-    ['date', 'Дата занятия', 'Любая дата', (value) => dayFormat.format(dateAt(value))],
-    ['faculty', 'Факультет', 'Все факультеты', (value) => value],
-  ]) {
-    const field = element('label', 'teacher-field', label);
-    const select = element('select');
-    select.setAttribute('aria-label', label);
-    const values = [...new Set(lessons.map((lesson) => lesson[key]).filter(Boolean))].sort();
-    for (const value of ['', ...values]) {
-      const option = element('option', '', value ? format(value) : placeholder);
-      option.value = value;
-      select.append(option);
-    }
-    if (!values.includes(teacherJournalFilters[key])) teacherJournalFilters[key] = '';
-    select.value = teacherJournalFilters[key];
-    select.addEventListener('change', () => {
-      teacherJournalFilters[key] = select.value;
-      updateResults();
-    });
-    field.append(select);
-    controls.append(field);
+  const dates = [...new Set(lessons.map(({ date }) => date))].sort();
+  if (!dates.includes(teacherJournalFilters.date)) teacherJournalFilters.date = '';
+  const picker = teacherDatePicker(dates, updateResults);
+  const faculty = element('label', 'teacher-field', 'Факультет');
+  const select = element('select');
+  select.setAttribute('aria-label', 'Факультет');
+  const faculties = [...new Set(lessons.map((lesson) => lesson.faculty).filter(Boolean))].sort();
+  for (const value of ['', ...faculties]) {
+    const option = element('option', '', value || 'Все факультеты');
+    option.value = value;
+    select.append(option);
   }
+  if (!faculties.includes(teacherJournalFilters.faculty)) teacherJournalFilters.faculty = '';
+  select.value = teacherJournalFilters.faculty;
+  select.addEventListener('change', () => {
+    teacherJournalFilters.faculty = select.value;
+    updateResults();
+  });
+  faculty.append(select);
+  const reset = actionButton('Сбросить фильтры', () => {
+    teacherJournalFilters.date = teacherJournalFilters.faculty = select.value = '';
+    picker.clear();
+    updateResults();
+  });
+  controls.classList.add('journal-filters');
+  controls.append(picker.field, faculty, reset);
   function updateResults() {
     const { date, faculty } = teacherJournalFilters;
     if (!date && !faculty) {
@@ -1699,7 +1778,7 @@ function renderTeacherJournal({ lesson, work, maxPoints, rows }) {
     const output = teacherError();
     const status = element('p', 'muted');
     status.setAttribute('role', 'status');
-    input.disabled = posted || locked || Boolean(row.deleted);
+    input.disabled = posted || locked;
     let saved = row.draft ?? null;
     let pending;
     let cachedError = false;
@@ -1745,7 +1824,7 @@ function renderTeacherJournal({ lesson, work, maxPoints, rows }) {
       entries.slice(entries.indexOf(entry) + 1).find(({ input: next }) => !next.disabled)?.input.focus();
     });
     status.textContent = posted ? 'Опубликовано: ' + pointsFormat.format(row.points)
-      : row.deleted ? 'Балл удалён' : row.draft == null ? 'Не оценено' : 'Черновик сохранён';
+      : row.draft == null ? 'Не оценено' : 'Черновик сохранён';
     card.append(element('h3', '', row.name), status);
     if (!input.disabled) card.append(field, retry, output);
     if (row.editableUntil) {
@@ -1753,6 +1832,7 @@ function renderTeacherJournal({ lesson, work, maxPoints, rows }) {
         dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Moscow',
       });
       card.append(element('p', 'muted', (locked ? 'Срок исправления истёк: ' : 'Исправить до: ') + expiry + ' МСК'));
+      const history = teacherScoreHistory(row);
       if (locked) card.append(element('p', 'muted', 'Для исправления после срока свяжитесь с деканатом.'), anchor('#contacts', 'inline-link', 'Контакты деканата'));
       else if (posted || row.deleted) {
         const actions = element('div', 'teacher-toolbar');
@@ -1778,9 +1858,9 @@ function renderTeacherJournal({ lesson, work, maxPoints, rows }) {
             change('change', pointValue(edit.input));
           }), actionButton('Удалить балл', () => change('delete')));
         }
-        card.append(actions, actionError);
+        (row.deleted ? history : card).append(actions, actionError);
       }
-      card.append(teacherScoreHistory(row));
+      card.append(history);
     }
     return card;
   }, 'В группе пока нет студентов.');
@@ -1807,7 +1887,8 @@ function renderTeacherJournal({ lesson, work, maxPoints, rows }) {
       refreshSummary();
     }
   });
-  wrapper.append(anchor('#grades', 'inline-link', 'К списку занятий и изменениям'), meta, form);
+  const back = anchor('#grades', 'button button-secondary journal-back', '← К занятиям');
+  wrapper.append(back, meta, form);
   return panel('Выставить баллы', wrapper);
 }
 

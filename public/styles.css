@@ -1490,6 +1490,27 @@ details[open] > .record-summary::before { transform: rotate(45deg); }
 
 .teacher-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .teacher-toolbar .button { min-height: 44px; }
+.journal-filters { align-items: end; }
+.journal-date-picker { position: relative; }
+.journal-date-picker > summary { list-style: none; cursor: pointer; }
+.journal-date-picker > summary::-webkit-details-marker { display: none; }
+.journal-date-picker > summary::after { content: '⌄'; margin-inline-start: .65em; }
+.journal-calendar {
+  position: absolute;
+  z-index: 4;
+  inset: calc(100% + 6px) auto auto 0;
+  width: 260px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--glass-shadow);
+}
+.journal-calendar-header { display: flex; justify-content: space-between; align-items: center; gap: 4px; margin-bottom: 6px; }
+.journal-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; text-align: center; }
+.journal-calendar-grid .button { min-height: 34px; padding: 3px 0; }
+.journal-calendar-grid .button[aria-pressed="true"] { color: white; background: var(--primary); }
+.journal-back { justify-self: start; text-decoration: none; }
 .teacher-field { display: grid; gap: 4px; min-width: 0; font-weight: 600; }
 .teacher-field :is(input, textarea, select) {
   width: 100%; min-height: 44px; padding: 7px 10px;

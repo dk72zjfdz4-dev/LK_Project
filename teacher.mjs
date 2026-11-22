@@ -418,7 +418,7 @@ export function createTeacherWorkflows(db, { transaction, HttpError, civilDate, 
     return transaction(() => {
       const data = journal(teacherId, id);
       const row = requireJournalRow(data.rows, body?.studentId);
-      if (row.points !== null || row.deleted) throw new HttpError(409, 'Измените опубликованный балл через историю оценок.');
+      if (row.points !== null) throw new HttpError(409, 'Измените опубликованный балл через историю оценок.');
       requireWindow(row);
       const key = [teacherId, id, row.enrollmentId];
       if (body.points === null) removeDraft.run(...key);
@@ -466,6 +466,7 @@ export function createTeacherWorkflows(db, { transaction, HttpError, civilDate, 
       if (before !== after) {
         const key = [teacherId, id, row.enrollmentId];
         updateScore.run(after === null ? 'deleted' : 'published', after ?? score.points, ...key);
+        if (action === 'restore') removeDraft.run(...key);
         writeHistory.run(...key, score.publication_id, Date.now(), action, before, after);
       }
       return journal(teacherId, id);
