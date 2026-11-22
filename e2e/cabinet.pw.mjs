@@ -17,7 +17,7 @@ const test = base.extend({
     const server = spawn(process.execPath, ['server.mjs'], {
       env: {
         HOST: '127.0.0.1', PORT: '0', DB_PATH: join(directory, 'test.sqlite'),
-        DEMO_PASSWORD_1: student, DEMO_PASSWORD_2: other, DEMO_PASSWORD_TEACHER: teacher, DEMO_PASSWORD_DEAN: dean,
+        DEMO_PASSWORD_1: student, DEMO_PASSWORD_2: other, DEMO_PASSWORD_TEACHER: teacher, DEMO_PASSWORD_DEKANAT1: dean,
       },
     });
     const stopped = new Promise((resolve) => server.once('close', resolve));
@@ -429,10 +429,10 @@ for (const width of [360, 440, 1440]) {
       await expect(search).toBeVisible();
       const contactInfo = page.locator('#dialogue-info');
       await contactInfo.getByText('Контакты', { exact: true }).click();
-      await expect(contactInfo.getByText('dean-office@example.com', { exact: true })).toBeVisible();
+      await expect(contactInfo.getByText('dekanat1@example.com', { exact: true })).toBeVisible();
       const mailSummary = contactInfo.locator('.contact-mail-picker > summary');
       await mailSummary.press('Enter');
-      await expect(contactInfo.getByRole('link', { name: 'Почтовое приложение' })).toHaveAttribute('href', 'mailto:dean-office@example.com');
+      await expect(contactInfo.getByRole('link', { name: 'Почтовое приложение' })).toHaveAttribute('href', 'mailto:dekanat1@example.com');
       await page.getByRole('button', { name: 'Назад к диалогам' }).click();
       await expect(page.locator('#dialogue-heading')).toHaveText('Переписка');
       await expect(page.getByText('Выберите диалог.', { exact: true })).toBeVisible();

@@ -32,7 +32,7 @@ function teacherContact({ id: teacherId, login, name }) {
 }
 
 function deanContact(partnerId) {
-  return { id: `dean-${partnerId}`, name: 'Деканат', email: 'dean-office@example.com', teacherId: null, partnerId, role: 'dean' };
+  return { id: `dean-${partnerId}`, name: 'Деканат', email: 'dekanat1@example.com', teacherId: null, partnerId, role: 'dean' };
 }
 
 function dialogueContact(dialogue, viewerRole, teacherLogin) {

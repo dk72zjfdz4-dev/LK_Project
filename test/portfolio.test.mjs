@@ -28,7 +28,7 @@ test('private portfolio workflows, reviewer scope and exports', { timeout: 30000
     server = spawn(process.execPath, ['server.mjs'], {
       env: {
         HOST: '127.0.0.1', PORT: '0', DB_PATH: dbPath, DEMO_PASSWORD_1: passwords.student1,
-        DEMO_PASSWORD_2: passwords.student2, DEMO_PASSWORD_TEACHER: passwords.teacher1, DEMO_PASSWORD_DEAN: passwords.dekanat1,
+        DEMO_PASSWORD_2: passwords.student2, DEMO_PASSWORD_TEACHER: passwords.teacher1, DEMO_PASSWORD_DEKANAT1: passwords.dekanat1,
       },
     });
     origin = await new Promise((resolve, reject) => {

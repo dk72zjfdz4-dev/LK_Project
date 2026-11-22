@@ -10,7 +10,7 @@ import { test } from 'node:test';
 
 test('roles, applications, replies, grading, appeals and persistence', { timeout: 30000 }, async (t) => {
   const folder = await mkdtemp(join(tmpdir(), 'cabinet-workflows-'));
-  const accounts = { student1: '1', student2: '2', teacher1: 'TEACHER', dekanat1: 'DEAN' };
+  const accounts = { student1: '1', student2: '2', teacher1: 'TEACHER', dekanat1: 'DEKANAT1' };
   const passwords = Object.fromEntries(Object.keys(accounts).map((login) => [login, randomBytes(20).toString('base64url')]));
   const env = { ...process.env, HOST: '127.0.0.1', PORT: '0', DB_PATH: join(folder, 'test.sqlite') };
   for (const [login, slot] of Object.entries(accounts)) env['DEMO_PASSWORD_' + slot] = passwords[login];
@@ -97,7 +97,7 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
   assert.equal(minerva.length, 1);
   assert.equal(sinistra[0].teacherId, null);
   const office = initial.contacts.find(({ role }) => role === 'dean');
-  assert.equal(office.email, 'dean-office@example.com');
+  assert.equal(office.email, 'dekanat1@example.com');
   const search = (query, cookie) => expect('/search?q=' + encodeURIComponent(query), cookie);
   await expect('/help', null, undefined, 401);
   const { documents, faq } = await expect('/help', student);
@@ -201,7 +201,7 @@ test('roles, applications, replies, grading, appeals and persistence', { timeout
 
   const dialog = initial.dialogues.find((item) => /деканат/i.test(item.title));
   assert.ok(dialog);
-  assert.equal(dialog.contact.email, 'dean-office@example.com');
+  assert.equal(dialog.contact.email, 'dekanat1@example.com');
   const deanStudentContact = (await cabinet(dean)).dialogues.find(({ id }) => id === dialog.id).contact;
   assert.equal(deanStudentContact.name, (await expect('/me', student)).profile.fullName);
   assert.match(deanStudentContact.email, /@example\.com$/);

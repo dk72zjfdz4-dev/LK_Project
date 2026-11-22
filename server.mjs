@@ -89,7 +89,7 @@ const demos = [
     login: 'dekanat1',
     firstName: 'Ирина',
     lastName: 'Яровая',
-    passwordEnv: 'DEMO_PASSWORD_DEAN',
+    passwordEnv: 'DEMO_PASSWORD_DEKANAT1',
     role: 'dean',
     profile: ['Ирина Яровая', 'Деканат', 'Учебная служба', 0, ''],
     lessons: [],
