@@ -507,6 +507,21 @@ export function seedCabinet(db) {
     ]);
     db.exec('PRAGMA user_version = 15');
   }
+  if (version < 16) db.exec(`
+    UPDATE lessons SET weekday = 5
+    WHERE id IN (
+      SELECT l.id FROM lessons l
+      JOIN students s ON s.id = l.student_id
+      JOIN lesson_week_parity p ON p.lesson_id = l.id AND p.parity = 0
+      WHERE l.weekday = 3 AND s.role = 'student'
+        AND ((s.login = 'student1' AND l.start_time = '12:30')
+          OR (s.login = 'student2' AND l.start_time = '09:00'))
+    );
+    INSERT INTO lesson_week_parity (lesson_id, parity)
+    SELECT l.id, 1 FROM lessons l JOIN students s ON s.id = l.student_id
+    WHERE s.login = 'student1' AND s.role = 'student' AND l.weekday = 3 AND l.start_time = '10:40';
+    PRAGMA user_version = 16;
+  `);
 }
 
 function isPdf(contents) {

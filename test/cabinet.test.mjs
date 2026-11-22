@@ -136,6 +136,10 @@ test('student accounts, schedule ownership and session revocation', { timeout: 2
       assert.notDeepEqual(pairs(odd, 16 + weekday), pairs(even, 23 + weekday));
       assert.deepEqual(pairs(even, 23 + weekday), pairs(novemberLessons, 23 + weekday));
     }
+    assert.equal(pairs(odd, 18).length, users.length === 0 ? 3 : 2);
+    assert.equal(pairs(odd, 20).length, 2);
+    assert.equal(pairs(even, 25).length, 1);
+    assert.equal(pairs(even, 27).length, 3);
     const saturdayId = saturday[0].id;
     assert.equal((await request('/api/lessons/' + saturdayId, { cookie })).status, 200);
     assert.equal((await request('/api/lessons/' + saturdayId.replace(/2026-11-28$/, '2026-11-21'), { cookie })).status, 404);
