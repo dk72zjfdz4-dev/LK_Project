@@ -1915,8 +1915,7 @@ details[open] > .record-summary::before { transform: rotate(45deg); }
   .help-dialog[open] { width: auto; max-height: min(49dvh, calc(var(--help-height, 100dvh) - 76px)); }
 }
 
-.page-header h1:focus-visible { outline-width: 2px; outline-offset: 2px; width: fit-content; }
-.page-header h1.pointer-navigation:focus { outline: none; }
+.page-header h1:focus { outline: none; }
 #view-home .panel { border-color: transparent; }
 .header-inbox { min-width: 44px; min-height: 44px; justify-content: center; }
 .icon-control { position: relative; display: inline-flex; flex: none; }
