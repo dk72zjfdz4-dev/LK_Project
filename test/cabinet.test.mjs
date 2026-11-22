@@ -100,7 +100,7 @@ test('student accounts, schedule ownership and session revocation', { timeout: 2
     assert.ok(nextWeekLessons[0].date > lessons.at(-1).date);
     let monthLesson;
     let novemberLessons;
-    for (const month of ['2026-11', '2026-12']) {
+    for (const month of ['2026-09', '2026-10', '2026-11', '2026-12']) {
       const monthly = await request('/api/schedule?month=' + month, { cookie });
       assert.equal(monthly.status, 200);
       const payload = await monthly.json();
@@ -108,12 +108,9 @@ test('student accounts, schedule ownership and session revocation', { timeout: 2
       assert.ok(payload.lessons.length > lessons.length);
       assert.ok(payload.lessons.every(({ date }) => date.startsWith(month + '-')));
       assert.equal(new Set(payload.lessons.map(({ id }) => id)).size, payload.lessons.length);
-      if (month === '2026-12') {
-        monthLesson = payload.lessons.at(-1).id;
-        assert.ok(payload.lessons.every(({ change, cancelled }) => change === null && !cancelled));
-      } else {
-        novemberLessons = payload.lessons;
-      }
+      if (month === '2026-12') monthLesson = payload.lessons.at(-1).id;
+      if (month === '2026-11') novemberLessons = payload.lessons;
+      else assert.ok(payload.lessons.every(({ change, cancelled }) => change === null && !cancelled));
     }
     assert.equal((await request('/api/schedule?month=2026-13', { cookie })).status, 400);
     const week = await request('/api/schedule?week=2026-11-23', { cookie });

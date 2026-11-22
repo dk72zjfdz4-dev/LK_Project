@@ -250,6 +250,13 @@
   background: var(--login-field);
 }
 
+@media (forced-colors: none) {
+  .login-field input:focus {
+    outline: none;
+    border-color: var(--login-ink);
+  }
+}
+
 .login-password { position: relative; }
 .login-password input { padding-inline-end: 53px; }
 .login-password input::-ms-reveal { display: none; }

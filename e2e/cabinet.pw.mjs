@@ -266,9 +266,20 @@ for (const width of [360, 1440]) {
     if (width !== 360) await expandGroup(nav, 'Учёба');
     await nav.getByRole('link', { name: 'Расписание', exact: true }).click();
     await expect(page.locator('#week-grid')).toBeVisible();
+    await expect(page.locator('#week-grid .calendar-day:visible').first()).toHaveCSS('border-top-width', '0px');
     await page.getByRole('button', { name: 'Месяц', exact: true }).click();
     const month = page.getByLabel('Месяц расписания', { exact: true });
     const grid = page.locator('#month-grid');
+    await expect(month).toHaveCSS('border-top-width', '0px');
+    for (const [value, days, label] of [
+      ['2026-09', 30, /, 1 сентября, занятий: [1-9]/],
+      ['2026-10', 31, /, 1 октября, занятий: [1-9]/],
+    ]) {
+      await month.selectOption(value);
+      await expect(grid.locator('.month-cell')).toHaveCount(days);
+      await expect(grid.getByRole('button', { name: label })).toBeVisible();
+      await expect(grid.locator('.month-cell').first()).toHaveCSS('border-top-width', '0px');
+    }
     await month.selectOption('2026-11');
     await expect(grid.locator('.month-cell')).toHaveCount(30);
     const changedDay = grid.getByRole('button', { name: /, 24 ноября,.*есть изменения/ });

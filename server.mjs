@@ -357,7 +357,7 @@ function schedule(studentId, week = null) {
 }
 
 function monthSchedule(studentId, month) {
-  if (month !== '2026-11' && month !== '2026-12') throw new HttpError(400, 'Доступно расписание на ноябрь и декабрь 2026 года.');
+  if (!/^2026-(?:09|10|11|12)$/.test(month)) throw new HttpError(400, 'Доступно расписание с сентября по декабрь 2026 года.');
   const first = new Date(month + '-01T00:00:00Z');
   const after = new Date(first);
   after.setUTCMonth(after.getUTCMonth() + 1);

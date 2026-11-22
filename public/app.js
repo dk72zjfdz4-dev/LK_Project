@@ -632,8 +632,8 @@ function setScheduleMode(monthly) {
   byId('schedule-month-view').hidden = !monthly;
   if (!monthly || selectedMonth) return;
   const current = schedule?.today.slice(0, 7);
-  if (current === '2026-12') byId('schedule-month').value = current;
-  else byId('schedule-month').value = '2026-11';
+  const month = byId('schedule-month');
+  month.value = [...month.options].some(({ value }) => value === current) ? current : '2026-11';
   loadMonthSchedule();
 }
 
