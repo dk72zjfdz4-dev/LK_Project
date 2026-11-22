@@ -1,7 +1,8 @@
 .login-layout {
   --login-ink: #22324e;
   --login-muted: #465876;
-  --login-focus: #4933a4;
+  --login-focus: var(--login-accent);
+  --focus: var(--login-focus);
   --login-edge: #64778e;
   --login-glass: linear-gradient(140deg, rgb(208 231 250 / .88), rgb(223 233 255 / .8) 55%, rgb(214 242 251 / .86));
   --login-field: #fbfdff;
@@ -188,7 +189,7 @@
 }
 
 .login-theme label:hover span { color: var(--login-ink); }
-.login-theme input:focus-visible + span { outline: 3px solid var(--login-focus); outline-offset: -2px; }
+.login-theme input:focus-visible + span { outline: 2px solid var(--login-focus); outline-offset: -2px; }
 
 .login-headline {
   container-type: inline-size;
@@ -216,6 +217,8 @@
   border-radius: 25px;
   background: var(--login-glass);
   box-shadow: 0 24px 66px rgb(13 26 56 / .18);
+  cursor: default;
+  user-select: none;
 }
 
 @supports (backdrop-filter: blur(1px)) {
@@ -232,12 +235,12 @@
 
 .login-demo { color: var(--login-muted); font-size: .83rem; }
 .login-demo summary { width: fit-content; padding-block: 5px; cursor: pointer; }
-.login-demo p { margin-top: 4px; }
+.login-demo p { margin-top: 4px; user-select: text; }
 
 .login-form, .login-field { display: grid; }
 .login-form { gap: 14px; }
 .login-field { gap: 5px; }
-.login-field label { font-size: .9rem; font-weight: 650; }
+.login-field label { justify-self: start; font-size: .9rem; font-weight: 650; }
 
 .login-field input {
   width: 100%;
@@ -248,6 +251,8 @@
   border-radius: 10px;
   color: var(--login-ink);
   background: var(--login-field);
+  cursor: text;
+  user-select: text;
 }
 
 @media (forced-colors: none) {

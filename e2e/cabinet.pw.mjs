@@ -166,6 +166,14 @@ for (const width of [360, 741, 1440]) {
     const scene = page.locator('.login-scene img');
     await expect(scene).toHaveAttribute('src', '/assets/auth/winter-evening.webp');
     await expect(page.locator('.login-layout')).toHaveCSS('display', 'grid');
+    const loginField = page.locator('#login');
+    const fieldBounds = await loginField.boundingBox();
+    await page.mouse.click(fieldBounds.x - 2, fieldBounds.y + fieldBounds.height / 2);
+    await expect(loginField).not.toBeFocused();
+    await expect(page.locator('.login-panel')).toHaveCSS('cursor', 'default');
+    await loginField.click();
+    await expect(loginField).toBeFocused();
+    await expect(loginField).toHaveCSS('cursor', 'text');
     await fits(page);
     await page.screenshot({ path: `test-results/screenshots/seasonal-login-${width}.png`, animations: 'disabled' });
     await page.locator('#login-theme input[value="light"]').check();
@@ -1241,6 +1249,9 @@ for (const width of [360, 1440]) {
   test(`dean announces to each audience at ${width} px`, async ({ page, browser, cabinet }) => {
     test.setTimeout(60_000);
     await page.setViewportSize({ width, height: 820 });
+    if (width === 360) await page.addInitScript(() => {
+      Object.defineProperty(globalThis.crypto, 'randomUUID', { value: undefined });
+    });
     await login(page, cabinet, 'dean');
     const announcements = [
       ['students', 'Студенты', `Приём деканата сегодня до 16:00 · ${width}`, ''],
@@ -1252,15 +1263,20 @@ for (const width of [360, 1440]) {
       await page.getByRole('link', { name: 'Главная', exact: true }).filter({ visible: true }).click();
       await page.getByRole('link', { name: 'Создать объявление', exact: true }).click();
       const form = page.locator('#announcement-form');
+      await expect(page.locator('#announcement-new')).toBeHidden();
       const select = form.getByLabel('Аудитория');
       await expect(select).toHaveValue('');
       await select.selectOption(audience);
       await form.getByLabel('Тема', { exact: true }).fill(title);
       await form.getByLabel('Текст объявления').fill(body);
-      await form.getByRole('button', { name: 'Предпросмотр' }).click();
       const preview = form.locator('#announcement-preview');
-      await expect(preview.getByText(title, { exact: true })).toBeVisible();
-      await expect(preview).toContainText(label);
+      if (audience === 'students') {
+        await expect(preview).toBeHidden();
+      } else {
+        await form.getByRole('button', { name: 'Предпросмотр' }).click();
+        await expect(preview.getByText(title, { exact: true })).toBeVisible();
+        await expect(preview).toContainText(label);
+      }
       await fits(page);
       if (audience === 'students') {
         await page.route('**/api/dean/announcements', async (route) => {
@@ -1273,6 +1289,7 @@ for (const width of [360, 1440]) {
         await expect(form.getByLabel('Тема', { exact: true })).toHaveValue(title);
       }
       await form.getByRole('button', { name: 'Опубликовать', exact: true }).click();
+      await expect(page.locator('#announcement-result')).toHaveText('Объявление опубликовано.');
       await expect(history.getByText(title, { exact: true })).toHaveCount(1);
     }
     await page.reload();

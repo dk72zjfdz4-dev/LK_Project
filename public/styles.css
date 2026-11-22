@@ -12,7 +12,7 @@
   --primary: #17536b;
   --primary-hover: #153d59;
   --indigo: #343580;
-  --focus: #4d3eaa;
+  --focus: var(--primary);
   --backdrop: rgb(23 39 73 / .38);
   --radius: 16px;
   --glass: #eff6fc;
@@ -41,7 +41,13 @@ button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: wait; opacity: .65; }
 a { color: var(--primary); }
-:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+@media (forced-colors: none) {
+  :is(input:not([type]), input:is([type="text"], [type="search"], [type="password"], [type="email"], [type="tel"], [type="url"], [type="number"]), textarea):focus-visible {
+    outline: none;
+  }
+}
 
 .visually-hidden {
   position: absolute;

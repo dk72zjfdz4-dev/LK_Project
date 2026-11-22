@@ -260,7 +260,6 @@
             </div>
           </div>
           <div class="home-stats" id="home-staff-stats" hidden></div>
-          <div id="home-staff" class="home-grid" hidden></div>
         </section>
 
         <section class="view" id="view-schedule" aria-label="Расписание занятий" hidden>
@@ -340,6 +339,7 @@
         <section class="view cabinet-layout" id="view-announcements" aria-label="Объявления деканата" hidden>
           <section class="panel cabinet-layout">
             <button class="button button-primary" id="announcement-new" type="button" aria-expanded="false" aria-controls="announcement-form">Создать объявление</button>
+            <p class="muted" id="announcement-result" role="status" hidden></p>
             <form class="cabinet-form" id="announcement-form" tabindex="-1" hidden>
               <label class="teacher-field">Аудитория<select name="audience" aria-label="Аудитория" required>
                 <option value="">Выберите аудиторию</option>
@@ -349,8 +349,11 @@
               </select></label>
               <label class="teacher-field">Тема<input name="title" required maxlength="160"></label>
               <label class="teacher-field">Текст объявления<textarea name="text" rows="4" maxlength="4000"></textarea></label>
-              <button class="button button-secondary" type="submit">Предпросмотр</button>
-              <div class="cabinet-layout" id="announcement-preview" hidden></div>
+              <div class="cabinet-layout" id="announcement-preview" tabindex="-1" hidden></div>
+              <div class="teacher-toolbar">
+                <button class="button button-secondary" type="submit">Предпросмотр</button>
+                <button class="button button-primary" id="announcement-publish" type="submit">Опубликовать</button>
+              </div>
               <p class="local-error" id="announcement-error" role="alert"></p>
             </form>
           </section>

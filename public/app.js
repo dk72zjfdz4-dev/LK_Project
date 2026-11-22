@@ -238,7 +238,10 @@ function showLogin(message = '', focusHeading = false) {
   announcementLoad = announcementDraft = undefined;
   byId('announcement-form').reset();
   byId('announcement-form').hidden = true;
+  byId('announcement-new').hidden = false;
   byId('announcement-new').ariaExpanded = 'false';
+  byId('announcement-result').hidden = true;
+  byId('announcement-result').textContent = '';
   byId('announcement-preview').hidden = true;
   byId('announcement-preview').replaceChildren();
   byId('announcement-error').textContent = '';
@@ -310,7 +313,6 @@ function showLogin(message = '', focusHeading = false) {
   byId('cabinet-status').hidden = true;
   byId('home-stats').hidden = true;
   byId('home-staff-stats').hidden = true;
-  byId('home-staff').hidden = true;
   byId('home-cabinet').hidden = true;
   byId('messaging').hidden = true;
   messageForm.hidden = true;
@@ -326,7 +328,7 @@ function showLogin(message = '', focusHeading = false) {
   }
   for (const id of [
     'week-grid', 'upcoming-lessons', 'changed-lessons', 'home-day', 'home-week-label', 'home-stats',
-    'home-cabinet', 'home-staff', 'home-staff-stats', 'grades-content', 'assignments-content', 'requests-content',
+    'home-cabinet', 'home-staff-stats', 'grades-content', 'assignments-content', 'requests-content',
     'dialogues-content', 'updates-content', 'contacts-content', 'dialogue-contact', 'lesson-dialog-content', 'action-status',
     'documents-content', 'document-catalog-status', 'faq-status',
     'library-results', 'library-status', 'library-error',
@@ -361,7 +363,7 @@ function showApp(account, focusHeading = false) {
   byId('sidebar-initials').textContent = initials;
   byId('profile-initials').textContent = initials;
   byId('sidebar-name').textContent = account.fullName.trim().replace(/\s+/g, '\n');
-  byId('welcome-name').textContent = (profile.role === 'student' ? 'Привет, ' : 'Здравствуйте, ') + (account.firstName || account.fullName) + '!';
+  byId('welcome-name').textContent = 'Здравствуйте, ' + (account.firstName || account.fullName) + '!';
   byId('profile-role').textContent = roleName;
   byId('sidebar-group').textContent = groupOrRole;
   byId('document-catalog').hidden = profile.role !== 'student';
@@ -1149,21 +1151,7 @@ function renderDashboard() {
     }, cabinet ? 'Ближайших дедлайнов нет.' : 'Загружаем задания…'));
     byId('home-cabinet').replaceChildren(deadlinePanel);
     byId('home-cabinet').hidden = false;
-    return;
   }
-
-  const staff = byId('home-staff');
-  if (!cabinet) return;
-  const recent = profile.role === 'dean'
-    ? cabinet.requests.filter((item) => ['submitted', 'processing'].includes(item.status)).slice(0, 4)
-    : cabinet.assignments.filter((item) => item.submission?.status === 'submitted').slice(0, 4);
-  const title = profile.role === 'dean' ? 'Открытые заявки' : 'Работы на проверке';
-  staff.replaceChildren(panel(title, listFor(recent, (item) => {
-    const row = element('div');
-    row.append(element('h3', 'lesson-title', item.type || item.title), element('p', 'muted', item.studentName));
-    return row;
-  }, 'Новых записей нет.')));
-  staff.hidden = false;
 }
 
 function renderGrades(grades) {
@@ -2063,6 +2051,8 @@ function showAnnouncementForm() {
   const form = byId('announcement-form');
   form.hidden = false;
   byId('announcement-new').ariaExpanded = 'true';
+  byId('announcement-new').hidden = true;
+  byId('announcement-result').hidden = true;
   form.focus({ preventScroll: true });
 }
 
@@ -2090,9 +2080,11 @@ async function loadAnnouncements() {
   }
 }
 
-function previewAnnouncement(event) {
+async function submitAnnouncement(event) {
   event.preventDefault();
   const form = event.currentTarget;
+  const publish = byId('announcement-publish');
+  if (publish.disabled) return;
   const data = new FormData(form);
   const draft = { audience: data.get('audience'), title: data.get('title').trim(), text: data.get('text').trim() };
   const output = byId('announcement-error');
@@ -2100,41 +2092,46 @@ function previewAnnouncement(event) {
     output.textContent = 'Выберите аудиторию и укажите тему.';
     return;
   }
-  const fingerprint = JSON.stringify(draft);
-  if (announcementDraft?.fingerprint !== fingerprint) announcementDraft = { fingerprint, clientId: crypto.randomUUID() };
   output.textContent = '';
   const preview = byId('announcement-preview');
+  if (event.submitter !== publish) {
+    preview.replaceChildren(element('h3', '', 'Предпросмотр объявления'), element('strong', '', draft.title),
+      element('p', 'muted', 'Аудитория: ' + announcementAudiences[draft.audience]));
+    if (draft.text) preview.append(element('p', 'dean-copy', draft.text));
+    preview.hidden = false;
+    preview.focus();
+    return;
+  }
+  const fingerprint = JSON.stringify(draft);
+  if (announcementDraft?.fingerprint !== fingerprint) {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    const clientId = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+    announcementDraft = { fingerprint, clientId };
+  }
   const account = profile;
-  const publish = actionButton('Опубликовать', async () => {
-    if (publish.disabled) return;
-    publish.disabled = true;
-    output.textContent = '';
-    const fields = [...form.elements];
-    for (const field of fields) field.disabled = true;
-    try {
-      await post('/api/dean/announcements', { ...draft, clientId: announcementDraft.clientId });
-      if (profile !== account) return;
-      announcementDraft = undefined;
-      form.reset();
-      preview.replaceChildren();
-      preview.hidden = form.hidden = true;
-      byId('announcement-new').ariaExpanded = 'false';
-      byId('announcement-new').focus({ preventScroll: true });
-      byId('action-status').textContent = 'Объявление опубликовано.';
-      await loadAnnouncements();
-    } catch (error) {
-      if (profile === account && !endSession(error)) output.textContent = error.message + ' Можно повторить публикацию.';
-    } finally {
-      for (const field of fields) field.disabled = false;
-      publish.disabled = false;
-    }
-  }, true);
-  preview.replaceChildren(element('h3', '', 'Предпросмотр объявления'), element('strong', '', draft.title),
-    element('p', 'muted', 'Аудитория: ' + announcementAudiences[draft.audience]));
-  if (draft.text) preview.append(element('p', 'dean-copy', draft.text));
-  preview.append(publish);
-  preview.hidden = false;
-  publish.focus({ preventScroll: true });
+  const fields = [...form.elements];
+  for (const field of fields) field.disabled = true;
+  form.setAttribute('aria-busy', 'true');
+  try {
+    await post('/api/dean/announcements', { ...draft, clientId: announcementDraft.clientId });
+    if (profile !== account) return;
+    announcementDraft = undefined;
+    form.reset();
+    preview.replaceChildren();
+    preview.hidden = form.hidden = true;
+    byId('announcement-new').hidden = false;
+    byId('announcement-new').ariaExpanded = 'false';
+    byId('announcement-new').focus({ preventScroll: true });
+    const result = byId('announcement-result');
+    result.hidden = false;
+    result.textContent = 'Объявление опубликовано.';
+    await loadAnnouncements();
+  } catch (error) {
+    if (profile === account && !endSession(error)) output.textContent = error.message + ' Можно повторить публикацию.';
+  } finally {
+    for (const field of fields) field.disabled = false;
+    form.removeAttribute('aria-busy');
+  }
 }
 
 function renderDeanQueue(force = false) {
@@ -3969,7 +3966,7 @@ async function runSearch(query, account, load) {
 
 byId('cabinet-retry').addEventListener('click', () => loadCabinet({ fresh: true }));
 byId('announcement-new').addEventListener('click', showAnnouncementForm);
-byId('announcement-form').addEventListener('submit', previewAnnouncement);
+byId('announcement-form').addEventListener('submit', submitAnnouncement);
 byId('announcement-form').addEventListener('input', () => {
   const preview = byId('announcement-preview');
   preview.hidden = true;
