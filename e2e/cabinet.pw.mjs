@@ -381,11 +381,13 @@ test('mobile search opens the document form and campus opens the chosen card', a
 
 for (const width of [360, 440, 1440]) {
   test(`messenger layout, independent drafts and emoji at ${width} px`, async ({ page, cabinet }) => {
+    const mobile = width <= 680;
     await page.setViewportSize({ width, height: width === 440 ? 450 : 820 });
     await login(page, cabinet);
     const launcher = page.locator('#help-launcher');
     const homePosition = await launcher.boundingBox();
     await page.locator('#header-inbox').click();
+    if (mobile) await expect(launcher).toBeHidden();
     await expect(page.locator('.mobile-header .brand [aria-hidden="true"]')).toHaveText('ЛК');
     const search = page.getByRole('searchbox', { name: 'Поиск диалогов' });
     const captureChat = (part) => page.screenshot({ path: `test-results/screenshots/messages-${part}-${width}.png`, animations: 'disabled' });
@@ -400,26 +402,45 @@ for (const width of [360, 440, 1440]) {
     const send = page.locator('#message-submit');
     await expect(send).toBeDisabled();
     await expect(send).toHaveCSS('cursor', 'default');
-    await expect(launcher).toBeInViewport();
-    expect(await launcher.boundingBox()).toEqual(homePosition);
-    await page.evaluate(() => globalThis.scrollTo(0, globalThis.document.documentElement.scrollHeight));
-    expect(await launcher.boundingBox()).toEqual(homePosition);
-    await page.evaluate(() => globalThis.scrollTo(0, 0));
+    if (mobile) {
+      const { y, height } = await page.locator('#messaging').boundingBox();
+      const tabs = await page.locator('.mobile-tabs').boundingBox();
+      expect(tabs.y - y - height).toBeCloseTo(6, 0);
+    } else {
+      await expect(launcher).toBeInViewport();
+      expect(await launcher.boundingBox()).toEqual(homePosition);
+      await page.evaluate(() => globalThis.scrollTo(0, globalThis.document.documentElement.scrollHeight));
+      expect(await launcher.boundingBox()).toEqual(homePosition);
+      await page.evaluate(() => globalThis.scrollTo(0, 0));
+    }
     if (width === 360) {
+      const setKeyboardHeight = (height) => {
+        const viewport = globalThis.visualViewport;
+        if (height) Object.defineProperty(viewport, 'height', { configurable: true, value: height });
+        else delete viewport.height;
+        viewport.dispatchEvent(new Event('resize'));
+      };
+      await page.evaluate(setKeyboardHeight, 440);
+      await expect(page.locator('#app')).toHaveCSS('height', '440px');
+      const field = await composer.boundingBox();
+      expect(field.y + field.height).toBeLessThan(440);
+      await page.evaluate(setKeyboardHeight, null);
       await composer.fill('Добрый день! Подскажите, пожалуйста, статус справки.');
       await composer.press('Enter');
       await expect(composer).toHaveValue('');
     }
     await composer.fill('Привет мир');
     await expect(composer).toHaveCSS('outline-style', 'none');
-    await expect(launcher).toBeInViewport();
-    await expect(page.locator('.help-dock')).toHaveCSS('position', 'fixed');
     await page.locator('#message-submit').click({ trial: true });
-    await launcher.click();
-    const helper = page.locator('#help-dialog');
-    await expect(helper).toBeVisible();
-    await helper.getByRole('button', { name: 'Закрыть помощника' }).click();
-    await expect(launcher).toBeFocused();
+    if (!mobile) {
+      await expect(launcher).toBeInViewport();
+      await expect(page.locator('.help-dock')).toHaveCSS('position', 'fixed');
+      await launcher.click();
+      const helper = page.locator('#help-dialog');
+      await expect(helper).toBeVisible();
+      await helper.getByRole('button', { name: 'Закрыть помощника' }).click();
+      await expect(launcher).toBeFocused();
+    }
     await expect(composer).toHaveValue('Привет мир');
     await composer.press('Home');
     await composer.press('ArrowRight');
@@ -436,6 +457,8 @@ for (const width of [360, 440, 1440]) {
       await expect(search).toBeVisible();
       await contact.click();
       await expect(composer).toHaveValue('П🙂ривет мир');
+      await page.locator('.mobile-tabs').getByRole('link', { name: 'Главная', exact: true }).click();
+      await expect(launcher).toBeVisible();
     } else {
       await expect(search).toBeVisible();
       const contactInfo = page.locator('#dialogue-info');

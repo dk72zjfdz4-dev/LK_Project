@@ -592,25 +592,27 @@ function renderWeek(lessons, today, start) {
   renderHomeWeekLabel();
 
   for (const [index, isoDate] of isoDates.entries()) {
+    const dayLessons = lessons.filter((lesson) => lesson.date === isoDate);
+    const hasChanges = dayLessons.some(({ change, cancelled }) => change || cancelled);
+    const dayName = dayFormat.format(dates[index]) + (isoDate === today ? ', сегодня' : '');
     const label = element('label', 'day-option');
     const input = element('input', 'visually-hidden');
     input.type = 'radio';
     input.name = 'visible-day';
     input.value = isoDate;
     input.checked = isoDate === active;
-    input.setAttribute('aria-label', dayFormat.format(dates[index]) + (isoDate === today ? ', сегодня' : ''));
-    const chip = element('span', 'day-chip');
+    input.setAttribute('aria-label', dayName + (hasChanges ? ', есть изменения' : ''));
+    const chip = element('span', hasChanges ? 'day-chip day-chip-changed' : 'day-chip');
     chip.setAttribute('aria-hidden', 'true');
     chip.append(element('span', '', shortWeekdays[index]), element('strong', '', dates[index].getUTCDate()));
     label.append(input, chip);
     picker.append(label);
-    const dayLessons = lessons.filter((lesson) => lesson.date === isoDate);
     grid.append(calendarDay(isoDate, index, today, dayLessons));
     const count = dayLessons.filter((lesson) => !lesson.cancelled).length;
     const homeLabel = label.cloneNode(true);
     const homeInput = homeLabel.querySelector('input');
     homeInput.name = 'home-visible-day';
-    homeInput.setAttribute('aria-label', input.getAttribute('aria-label') + ', занятий: ' + count);
+    homeInput.setAttribute('aria-label', dayName + ', занятий: ' + count);
     homeInput.setAttribute('aria-controls', 'home-day');
     if (isoDate === today) homeInput.setAttribute('aria-current', 'date');
     const homeChip = homeLabel.querySelector('.day-chip');
@@ -3114,11 +3116,13 @@ helpDialog.addEventListener('close', () => {
 function sizeMessaging() {
   const viewport = window.visualViewport;
   if (!viewport) return;
-  const messaging = byId('messaging');
+  const shell = byId('app');
   if (window.innerHeight - viewport.height > 80 && viewport.scale === 1) {
-    messaging.style.setProperty('--messenger-viewport-height', viewport.height + 'px');
+    shell.style.setProperty('--messenger-viewport-height', viewport.height + 'px');
+    shell.style.setProperty('--messenger-nav-space', '0px');
   } else {
-    messaging.style.removeProperty('--messenger-viewport-height');
+    shell.style.removeProperty('--messenger-viewport-height');
+    shell.style.removeProperty('--messenger-nav-space');
   }
 }
 

@@ -77,6 +77,17 @@
 
   .mobile-avatar { flex: 0 0 44px; text-decoration: none; }
 
+  #day-picker .day-chip-changed {
+    color: #75410f;
+    background: var(--peach);
+  }
+
+  #day-picker input:checked + .day-chip-changed {
+    background: color-mix(in srgb, var(--peach) 65%, #dba76f);
+  }
+
+  .month-choice-count { display: none; }
+
   .page-header:has(.mobile-menu-back:not([hidden])) { justify-content: flex-start; gap: 8px; }
   .page-header:has(.mobile-menu-back:not([hidden])) h1 { flex: 1; min-width: 0; }
   .mobile-menu-back.button {
@@ -89,12 +100,32 @@
     border-radius: 10px;
   }
 
-  .messaging {
-    grid-template-columns: minmax(0, 1fr);
-    height: max(230px, calc(var(--messenger-viewport-height, 100dvh) - var(--mobile-tabs-height) - 8rem - env(safe-area-inset-top)));
+  .app-shell:has(#view-messages:not([hidden])) {
+    display: flex;
+    flex-direction: column;
+    height: var(--messenger-viewport-height, 100dvh);
+    min-height: 0;
+    padding-bottom: var(--messenger-nav-space, var(--mobile-tabs-height));
   }
+
+  .app-shell:has(#view-messages:not([hidden])) :is(.workspace, .main-content, #view-messages) {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .app-shell:has(#view-messages:not([hidden])) :is(.app-header, .page-header) { flex-shrink: 0; }
+  .app-shell:has(#view-messages:not([hidden])) :is(.app-footer, .help-dock) { display: none; }
+
+  .messaging,
   .messaging.has-dialogue {
-    height: max(190px, calc(var(--messenger-viewport-height, 100dvh) - var(--mobile-tabs-height) - 8rem - 54px - env(safe-area-inset-top)));
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    flex: 1 1 0;
+    height: auto;
+    min-height: 160px;
+    margin-block-end: 6px;
   }
 
   .messaging:not(.has-dialogue) .conversation,
@@ -102,7 +133,6 @@
     display: none;
   }
 
-  .messaging .dialogue-list { padding-block-end: 52px; }
   .messaging .dialogue-avatar { width: 34px; height: 34px; }
   .messaging .dialogue-contact > summary { padding-inline: 4px; }
 
