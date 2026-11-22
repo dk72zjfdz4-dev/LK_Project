@@ -91,7 +91,7 @@
 
   .messaging .dialogue-list { padding-block-end: 52px; }
   .messaging .dialogue-avatar { width: 34px; height: 34px; }
-  .messaging .dialogue-contact summary { padding-inline: 4px; }
+  .messaging .dialogue-contact > summary { padding-inline: 4px; }
 
   .mobile-menu-page {
     display: grid;

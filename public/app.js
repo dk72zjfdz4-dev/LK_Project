@@ -1202,7 +1202,22 @@ function contactCard(contact, { withId = false, canMessage = false, studentProfi
       status.textContent = 'Выделите и скопируйте адрес вручную.';
     }
   });
-  const mail = anchor('mailto:' + contact.email, 'inline-link', 'Открыть почту');
+  const email = encodeURIComponent(contact.email);
+  const mailto = 'mailto:' + email.replace('%40', '@');
+  const mail = element('details', 'contact-mail-picker');
+  const mailSummary = element('summary', 'inline-link', 'Открыть почту');
+  const mailOptions = element('div', 'contact-mail-options');
+  for (const [label, href] of [
+    ['Gmail', 'https://mail.google.com/mail/?view=cm&fs=1&to=' + email],
+    ['Почта Mail', 'https://e.mail.ru/compose/?mailto=' + encodeURIComponent(mailto)],
+  ]) {
+    const provider = anchor(href, 'inline-link', label);
+    provider.target = '_blank';
+    provider.rel = 'noopener noreferrer';
+    mailOptions.append(provider);
+  }
+  mailOptions.append(anchor(mailto, 'inline-link', 'Почтовое приложение'));
+  mail.append(mailSummary, mailOptions);
   const studentMessaging = canMessage && profile.role === 'student';
   const errorOutput = element('p', 'local-error');
   errorOutput.setAttribute('role', 'alert');

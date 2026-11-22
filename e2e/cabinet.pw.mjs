@@ -381,7 +381,9 @@ for (const width of [360, 440, 1440]) {
       const contactInfo = page.locator('#dialogue-info');
       await contactInfo.getByText('Контакты', { exact: true }).click();
       await expect(contactInfo.getByText('dean-office@example.com', { exact: true })).toBeVisible();
-      await expect(contactInfo.getByRole('link', { name: 'Открыть почту' })).toHaveAttribute('href', 'mailto:dean-office@example.com');
+      const mailSummary = contactInfo.locator('.contact-mail-picker > summary');
+      await mailSummary.press('Enter');
+      await expect(contactInfo.getByRole('link', { name: 'Почтовое приложение' })).toHaveAttribute('href', 'mailto:dean-office@example.com');
       await page.getByRole('button', { name: 'Назад к диалогам' }).click();
       await expect(page.locator('#dialogue-heading')).toHaveText('Переписка');
       await expect(page.getByText('Выберите диалог.', { exact: true })).toBeVisible();
@@ -393,7 +395,7 @@ for (const width of [360, 440, 1440]) {
       await page.locator('#dialogue-info').getByText('Контакты', { exact: true }).click();
       const details = page.locator('#dialogue-contact');
       await expect(details.getByText('Северус Снегг', { exact: true })).toHaveCount(1);
-      await expect(details.getByRole('link', { name: 'Открыть почту' })).toBeVisible();
+      await expect(details.getByText('Открыть почту', { exact: true })).toBeVisible();
       await contact.click();
       await expect(composer).toHaveValue('П🙂ривет мир');
     }
@@ -490,7 +492,7 @@ for (const width of [360, 1440]) {
     await expect(card.getByRole('heading')).toHaveText('Крош Андреевич Речин');
     await expect(card.locator('dt')).toHaveText(['Факультет', 'Направление', 'Группа', 'Курс']);
     await expect(card.locator('dd')).toHaveText(['Слизерин', 'Зельеварение и алхимия', 'СЛ-23-04', '3']);
-    await expect(card.getByRole('link', { name: 'Открыть почту' })).toHaveCount(0);
+    await expect(card.getByText('Открыть почту', { exact: true })).toHaveCount(0);
     await fits(page);
   });
 }
@@ -680,7 +682,23 @@ for (const width of [360, 440]) {
     const lessonCard = page.locator('#lesson-dialog');
     const write = lessonCard.getByRole('button', { name: 'Написать', exact: true });
     await expect(write).toBeVisible();
-    await expect(lessonCard.getByRole('link', { name: 'Открыть почту' })).toHaveAttribute('href', /^mailto:/);
+    await lessonCard.getByText('Открыть почту', { exact: true }).click();
+    const expectedMailto = 'mailto:' + teacher.email;
+    await expect(lessonCard.getByRole('link', { name: 'Почтовое приложение' })).toHaveAttribute('href', expectedMailto);
+    for (const [label, origin, key, recipient] of [
+      ['Gmail', 'https://mail.google.com', 'to', teacher.email],
+      ['Почта Mail', 'https://e.mail.ru', 'mailto', expectedMailto],
+    ]) {
+      await page.context().route(origin + '/**', (route) => route.fulfill({ body: 'Почтовый сервис' }));
+      const opened = page.waitForEvent('popup');
+      await lessonCard.getByRole('link', { name: label, exact: true }).click();
+      const mailTab = await opened;
+      await mailTab.waitForLoadState();
+      const url = new URL(mailTab.url());
+      expect(url.origin).toBe(origin);
+      expect(url.searchParams.get(key)).toBe(recipient);
+      await mailTab.close();
+    }
     await write.click();
     await expect(lessonCard).toBeHidden();
     await expect(page.locator('#dialogue-heading')).toHaveText(teacher.name);

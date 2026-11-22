@@ -1285,7 +1285,7 @@ details[open] > .record-summary::before { transform: rotate(45deg); }
 .dialogue-error:not(:empty) { padding: 6px var(--messenger-space); }
 
 .dialogue-contact:not(:has(#dialogue-contact > *)) { display: none; }
-.dialogue-contact summary {
+.dialogue-contact > summary {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1296,8 +1296,8 @@ details[open] > .record-summary::before { transform: rotate(45deg); }
   font-size: .82rem;
   cursor: pointer;
 }
-.dialogue-contact summary::-webkit-details-marker { display: none; }
-.dialogue-contact summary::after {
+.dialogue-contact > summary::-webkit-details-marker { display: none; }
+.dialogue-contact > summary::after {
   width: 7px;
   height: 7px;
   border-right: 1.5px solid;
@@ -1305,8 +1305,8 @@ details[open] > .record-summary::before { transform: rotate(45deg); }
   transform: rotate(45deg);
   content: "";
 }
-.dialogue-contact[open] summary { background: var(--mint); }
-.dialogue-contact[open] summary::after { transform: rotate(225deg); }
+.dialogue-contact[open] > summary { background: var(--mint); }
+.dialogue-contact[open] > summary::after { transform: rotate(225deg); }
 #dialogue-contact {
   position: absolute;
   inset: 100% var(--messenger-space) auto auto;
@@ -1445,6 +1445,24 @@ details[open] > .record-summary::before { transform: rotate(45deg); }
 .message-form .local-error { font-size: .85rem; }
 .contact-actions, .request-document-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .contact-actions .inline-link, .request-document-actions .inline-link { display: inline-flex; align-items: center; min-height: 44px; }
+.contact-mail-picker[open] { flex-basis: 100%; }
+.contact-mail-picker > summary { gap: 8px; cursor: pointer; }
+.contact-mail-picker > summary::-webkit-details-marker { display: none; }
+.contact-mail-picker > summary::after {
+  width: 6px;
+  height: 6px;
+  border-inline-end: 1.5px solid;
+  border-block-end: 1.5px solid;
+  transform: rotate(45deg);
+  content: "";
+}
+.contact-mail-picker[open] > summary::after { transform: rotate(225deg); }
+.contact-mail-options {
+  display: grid;
+  justify-items: start;
+  padding-inline-start: 10px;
+  border-inline-start: 1px solid var(--border);
+}
 .emoji-options {
   position: absolute;
   z-index: 2;

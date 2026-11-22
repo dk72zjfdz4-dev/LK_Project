@@ -242,7 +242,12 @@ test('demo contact offers clipboard confirmation and manual copying fallback', a
   const [button, mail] = actions.children;
   assert.equal(label.textContent, 'Демо-адрес');
   assert.equal(address.textContent, email);
-  assert.equal(mail.href, 'mailto:' + email);
+  const [summary, options] = mail.children;
+  assert.equal(summary.textContent, 'Открыть почту');
+  const [gmail, mailRu, defaultMail] = options.children;
+  assert.equal(new URL(gmail.href).searchParams.get('to'), email);
+  assert.equal(new URL(mailRu.href).searchParams.get('mailto'), 'mailto:' + email);
+  assert.equal(defaultMail.href, 'mailto:' + email);
   await button.click();
   assert.match(status.textContent, /вручную/);
   navigator.clipboard = { async writeText(value) { copied = value; } };
