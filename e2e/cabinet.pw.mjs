@@ -107,6 +107,48 @@ test('home shows two upcoming changes until expanded', async ({ page, cabinet })
   expect(await top(deadlines)).toBeGreaterThan(await bottom(week));
 });
 
+for (const width of [360, 1440]) {
+  test(`week arrows switch both calendars at ${width} px`, async ({ page, cabinet }) => {
+    await page.setViewportSize({ width, height: 820 });
+    await login(page, cabinet);
+    const api = cabinet.origin + '/api/schedule';
+    const { weekStart } = await (await page.request.get(api)).json();
+    const offset = (days) => new Date(Date.parse(weekStart) + days * 86_400_000).toISOString().slice(0, 10);
+    const home = page.locator('.home-calendar');
+    const schedule = page.locator('#schedule-week-view');
+    const previous = (panel) => panel.getByRole('button', { name: 'Предыдущая неделя' });
+    const next = (panel) => panel.getByRole('button', { name: 'Следующая неделя' });
+    const homeDay = page.locator('#home-week input').first();
+    const scheduleDay = page.locator('#week-grid .calendar-day').first();
+    const upcoming = page.locator('#upcoming-lessons');
+    const changes = page.locator('#changed-lessons');
+    await expect(homeDay).toHaveValue(weekStart);
+    const announcements = [await upcoming.innerText(), await changes.innerText()];
+    await previous(home).press('Enter');
+    await expect(homeDay).toHaveValue(offset(-7));
+    await expect(previous(home)).toBeFocused();
+    expect([await upcoming.innerText(), await changes.innerText()]).toEqual(announcements);
+    await fits(page);
+    await page.getByRole('link', { name: 'Всё расписание' }).click();
+    await expect(scheduleDay).toHaveAttribute('data-date', offset(-7));
+    await next(schedule).click();
+    await expect(scheduleDay).toHaveAttribute('data-date', weekStart);
+    await page.route(api + '?week=' + offset(7), (route) => route.abort(), { times: 1 });
+    await next(schedule).click();
+    await expect(schedule.locator('[data-week-status]')).toContainText('Не удалось открыть неделю');
+    await expect(scheduleDay).toHaveAttribute('data-date', weekStart);
+    await next(schedule).click();
+    await expect(scheduleDay).toHaveAttribute('data-date', offset(7));
+    await expect(schedule.locator('[data-week-status]')).toBeEmpty();
+    await next(schedule).click();
+    await expect(scheduleDay).toHaveAttribute('data-date', offset(14));
+    await fits(page);
+    const mainNav = width <= 680 ? page.locator('.mobile-tabs') : page.locator('.sidebar');
+    await mainNav.getByRole('link', { name: 'Главная', exact: true }).click();
+    await expect(homeDay).toHaveValue(offset(14));
+  });
+}
+
 async function fits(page) {
   expect(await page.evaluate(() => globalThis.document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize().width);
 }

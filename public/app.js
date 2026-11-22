@@ -223,6 +223,7 @@ function showLogin(message = '', focusHeading = false) {
   openNavGroups.clear();
   profile = undefined;
   activeView = schedule = scheduleLoad = cabinet = cabinetLoad = selectedDay = selectedHomeDay = selectedDialogue = dialogueLoad = lessonOpen = undefined;
+  showWeekNavigation();
   window.clearInterval(pollTimer);
   renders.clear();
   messageStates.clear();
@@ -709,28 +710,48 @@ function showScheduleStatus(message = '', canRetry = false) {
   }
 }
 
-async function loadSchedule({ quiet = false } = {}) {
+function showWeekNavigation(pending = false, message = '') {
+  for (const button of document.querySelectorAll('[data-week-step]')) {
+    if (pending) button.setAttribute('aria-disabled', 'true');
+    else button.removeAttribute('aria-disabled');
+  }
+  for (const status of document.querySelectorAll('[data-week-status]')) status.textContent = message;
+}
+
+async function loadSchedule({ quiet = false, week } = {}) {
   const student = profile;
-  if (!student || scheduleLoad) return;
-  const load = {};
+  const browsing = week !== undefined;
+  if (!student || (scheduleLoad && (!browsing || scheduleLoad.browsing))) return;
+  const load = { browsing };
   scheduleLoad = load;
-  if (!quiet || !schedule) showScheduleStatus('Загружаем расписание…');
+  const selected = week ?? (schedule?.weekStart !== schedule?.currentWeek ? schedule.weekStart : undefined);
+  const current = () => profile === student && scheduleLoad === load;
+  let weekError = '';
+  if (browsing) showWeekNavigation(true);
+  else if (!quiet || !schedule) showScheduleStatus('Загружаем расписание…');
   try {
-    const { today, weekStart, lessons, nextWeekLessons = [] } = await request('/api/schedule');
-    if (profile !== student) return;
+    const path = '/api/schedule' + (selected ? '?week=' + encodeURIComponent(selected) : '');
+    const { today, weekStart, lessons, nextWeekLessons = [], selectedWeek } = await request(path);
+    if (!current()) return;
     lessons.sort(lessonOrder);
+    const visibleWeek = selectedWeek?.weekStart ?? weekStart;
+    const visibleLessons = selectedWeek ? selectedWeek.lessons.sort(lessonOrder) : lessons;
     const update = () => {
-      const calendarKey = JSON.stringify([today, weekStart, lessons]);
+      const calendarKey = JSON.stringify([today, visibleWeek, visibleLessons]);
       if (renders.get('calendar') !== calendarKey) {
-        if (selectedDay === schedule?.today) selectedDay = today;
-        if (selectedHomeDay === schedule?.today) selectedHomeDay = today;
-        schedule = { today, lessons };
-        renderWeek(lessons, today, weekStart);
+        if (visibleWeek === weekStart) {
+          if (selectedDay === schedule?.today) selectedDay = today;
+          if (selectedHomeDay === schedule?.today) selectedHomeDay = today;
+        }
+        schedule = { today, weekStart: visibleWeek, currentWeek: weekStart, lessons: visibleLessons };
+        renderWeek(visibleLessons, today, visibleWeek);
         renders.set('calendar', calendarKey);
+      } else {
+        schedule.currentWeek = weekStart;
       }
       const now = moscowTimeFormat.format(new Date());
       const ended = lessons.filter((lesson) => lesson.date === today && !lesson.cancelled && lesson.end <= now).length;
-      const homeKey = JSON.stringify([calendarKey, nextWeekLessons, ended]);
+      const homeKey = JSON.stringify([today, weekStart, lessons, nextWeekLessons, ended]);
       if (renders.get('schedule-home') !== homeKey) {
         renderHome(lessons, nextWeekLessons, today);
         renders.set('schedule-home', homeKey);
@@ -738,18 +759,23 @@ async function loadSchedule({ quiet = false } = {}) {
       showScheduleStatus();
       if (activeView === 'home') renderDashboard();
     };
-    if (quiet) preservePagePosition(update);
+    if (quiet || browsing) preservePagePosition(update);
     else update();
     revealTarget();
   } catch (error) {
-    if (profile !== student) return;
+    if (!current()) return;
     if (error.status === 401) {
       showLogin('Сессия завершена. Войдите снова.', true);
+    } else if (browsing) {
+      weekError = 'Не удалось открыть неделю. Нажмите стрелку ещё раз.';
     } else if (!quiet || !schedule) {
       showScheduleStatus(error.message, true);
     }
   } finally {
-    if (scheduleLoad === load) scheduleLoad = undefined;
+    if (current()) {
+      scheduleLoad = undefined;
+      if (browsing) showWeekNavigation(false, weekError);
+    }
   }
 }
 
@@ -3251,6 +3277,14 @@ byId('home-changes-toggle').addEventListener('click', ({ currentTarget }) => {
   currentTarget.ariaExpanded = String(currentTarget.ariaExpanded !== 'true');
 });
 byId('home-week').addEventListener('change', (event) => selectHomeDay(event.target.value));
+for (const button of document.querySelectorAll('[data-week-step]')) {
+  button.addEventListener('click', () => {
+    if (!schedule || scheduleLoad?.browsing) return;
+    const week = dateAt(schedule.weekStart);
+    week.setUTCDate(week.getUTCDate() + Number(button.dataset.weekStep));
+    void loadSchedule({ week: week.toISOString().slice(0, 10) });
+  });
+}
 for (const button of document.querySelectorAll('[data-schedule-retry]')) {
   button.addEventListener('click', loadSchedule);
 }

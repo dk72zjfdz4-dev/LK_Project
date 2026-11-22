@@ -301,7 +301,13 @@ function weekLessons(rows, monday, offset, cancellations) {
   });
 }
 
-function schedule(studentId) {
+function schedule(studentId, week = null) {
+  const selectedMonday = week === null ? null : new Date(week + 'T00:00:00Z');
+  if (selectedMonday && (!/^\d{4}-\d{2}-\d{2}$/.test(week) || !Number.isFinite(selectedMonday.getTime())
+    || civilDate(selectedMonday) !== week || selectedMonday.getUTCDay() !== 1
+    || week < '0001-01-01' || week > '9999-12-26')) {
+    throw new HttpError(400, 'Укажите дату понедельника в формате ГГГГ-ММ-ДД.');
+  }
   const { today, monday } = weekInMoscow();
   const rows = allLessons.all(studentId);
   const last = new Date(monday);
@@ -309,11 +315,27 @@ function schedule(studentId) {
   const weekStart = civilDate(monday);
   const cancellations = new Map(cancelledLessons.all(studentId, weekStart, civilDate(last))
     .map(({ lesson_id, date, change }) => [`${lesson_id}-${date}`, change]));
-  return {
+  const data = {
     today, weekStart,
     lessons: weekLessons(rows, monday, 0, cancellations),
     nextWeekLessons: weekLessons(rows, monday, 7, cancellations),
   };
+  if (selectedMonday) {
+    const nextMonday = new Date(monday);
+    nextMonday.setUTCDate(nextMonday.getUTCDate() + 7);
+    let lessons = data.lessons;
+    if (week === civilDate(nextMonday)) {
+      lessons = data.nextWeekLessons;
+    } else if (week !== weekStart) {
+      const sunday = new Date(selectedMonday);
+      sunday.setUTCDate(sunday.getUTCDate() + 6);
+      const selectedCancellations = new Map(cancelledLessons.all(studentId, week, civilDate(sunday))
+        .map(({ lesson_id, date, change }) => [`${lesson_id}-${date}`, change]));
+      lessons = weekLessons(rows, selectedMonday, 0, selectedCancellations);
+    }
+    data.selectedWeek = { weekStart: week, lessons };
+  }
+  return data;
 }
 
 function monthSchedule(studentId, month) {
@@ -477,8 +499,11 @@ async function api(request, response, path) {
   }
   if (account.role !== 'student') throw new HttpError(403, 'Расписание доступно студентам.');
   if (path === '/api/schedule') {
-    const month = new URLSearchParams(request.url.slice(path.length + 1)).get('month');
-    return json(response, 200, month === null ? schedule(account.id) : monthSchedule(account.id, month));
+    const params = new URLSearchParams(request.url.slice(path.length + 1));
+    const month = params.get('month');
+    const week = params.get('week');
+    if (month !== null && week !== null) throw new HttpError(400, 'Выберите неделю или месяц.');
+    return json(response, 200, month === null ? schedule(account.id, week) : monthSchedule(account.id, month));
   }
 
   const lesson = lessonById(account.id, lessonPath[1]);

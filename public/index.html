@@ -220,8 +220,17 @@
               <section class="panel home-calendar" data-student-schedule hidden>
                 <div class="panel-heading">
                   <h2>Учебная неделя</h2>
-                  <span class="muted" id="home-week-label"></span>
+                  <div class="week-navigation" role="group" aria-label="Выбор учебной недели">
+                    <button class="button button-secondary icon-button" type="button" data-week-step="-7" aria-label="Предыдущая неделя">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg>
+                    </button>
+                    <span class="muted" id="home-week-label" aria-live="polite"></span>
+                    <button class="button button-secondary icon-button" type="button" data-week-step="7" aria-label="Следующая неделя">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6"/></svg>
+                    </button>
+                  </div>
                 </div>
+                <p class="week-navigation-status muted" data-week-status role="status"></p>
                 <fieldset class="mini-week" id="home-week">
                   <legend class="visually-hidden">День учебной недели</legend>
                 </fieldset>
@@ -258,7 +267,18 @@
               </div>
             </div>
             <div id="schedule-week-view">
-              <div class="week-heading"><h2 id="week-label"></h2></div>
+              <div class="week-heading">
+                <div class="week-navigation" role="group" aria-label="Выбор недели расписания">
+                  <button class="button button-secondary icon-button" type="button" data-week-step="-7" aria-label="Предыдущая неделя">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg>
+                  </button>
+                  <h2 id="week-label" aria-live="polite"></h2>
+                  <button class="button button-secondary icon-button" type="button" data-week-step="7" aria-label="Следующая неделя">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6"/></svg>
+                  </button>
+                </div>
+              </div>
+              <p class="week-navigation-status muted" data-week-status role="status"></p>
               <fieldset class="day-picker" id="day-picker">
                 <legend class="visually-hidden">Выберите день недели</legend>
               </fieldset>

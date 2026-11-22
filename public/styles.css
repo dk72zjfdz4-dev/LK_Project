@@ -461,6 +461,25 @@ a { color: var(--primary); }
 }
 
 .week-heading span { color: var(--muted); font-size: .86rem; }
+.week-navigation {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+}
+.home-calendar .panel-heading { align-items: center; }
+.week-navigation .icon-button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+}
+.week-navigation .icon-button[aria-disabled="true"] { opacity: .55; cursor: wait; }
+.week-navigation :is(h2, #home-week-label) { text-align: center; }
+.week-navigation-status { margin: 0; }
+.week-navigation-status:not(:empty) { margin-block-end: 8px; }
 .schedule-toolbar {
   display: flex;
   flex-wrap: wrap;

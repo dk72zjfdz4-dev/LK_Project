@@ -95,7 +95,7 @@ test('student accounts, schedule ownership and session revocation', { timeout: 2
     assert.deepEqual(Object.keys(student).sort(), ['faculty', 'firstName', 'fullName', 'group', 'lastName', 'program', 'role', 'year']);
     const schedule = await request('/api/schedule', { cookie });
     assert.equal(schedule.status, 200);
-    const { lessons, nextWeekLessons } = await schedule.json();
+    const { weekStart, lessons, nextWeekLessons } = await schedule.json();
     assert.ok(lessons.length);
     assert.ok(nextWeekLessons[0].date > lessons.at(-1).date);
     let monthLesson;
@@ -110,7 +110,18 @@ test('student accounts, schedule ownership and session revocation', { timeout: 2
       if (month === '2026-12') monthLesson = payload.lessons.at(-1).id;
     }
     assert.equal((await request('/api/schedule?month=2026-13', { cookie })).status, 400);
-    users.push({ cookie, name: student.fullName, lesson: lessons[0].id, nextLesson: nextWeekLessons[0].id, monthLesson });
+    const week = await request('/api/schedule?week=2026-11-23', { cookie });
+    assert.equal(week.status, 200);
+    const selected = await week.json();
+    assert.equal(selected.weekStart, weekStart);
+    assert.equal(selected.selectedWeek.weekStart, '2026-11-23');
+    assert.ok(selected.selectedWeek.lessons.every(({ date }) => date >= '2026-11-23' && date <= '2026-11-29'));
+    assert.equal(selected.selectedWeek.lessons.some(({ cancelled }) => cancelled), users.length === 0);
+    const weekLesson = selected.selectedWeek.lessons[0].id;
+    for (const query of ['week=2026-12-01', 'week=2026-02-30', 'week=2026-11-23&month=2026-11']) {
+      assert.equal((await request('/api/schedule?' + query, { cookie })).status, 400);
+    }
+    users.push({ cookie, name: student.fullName, lesson: lessons[0].id, nextLesson: nextWeekLessons[0].id, monthLesson, weekLesson });
   }
 
   assert.notEqual(users[0].name, users[1].name);
@@ -122,6 +133,8 @@ test('student accounts, schedule ownership and session revocation', { timeout: 2
     assert.equal((await request(`/api/lessons/${users[1 - index].nextLesson}`, user)).status, 404);
     assert.equal((await request(`/api/lessons/${user.monthLesson}`, user)).status, 200);
     assert.equal((await request(`/api/lessons/${users[1 - index].monthLesson}`, user)).status, 404);
+    assert.equal((await request(`/api/lessons/${user.weekLesson}`, user)).status, 200);
+    assert.equal((await request(`/api/lessons/${users[1 - index].weekLesson}`, user)).status, 404);
     const rejected = await request('/api/logout', { ...user, method: 'POST', requestOrigin: 'https://example.invalid' });
     assert.equal(rejected.status, 403);
     assert.equal((await request('/api/logout', { ...user, method: 'POST' })).status, 204);
