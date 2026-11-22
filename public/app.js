@@ -24,6 +24,7 @@ const roleNames = { student: 'Студент', teacher: 'Преподавате�
 const weekdays = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
 const shortWeekdays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const dateFormat = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', timeZone: 'UTC' });
+const shortWeekDateFormat = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 const dayFormat = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', weekday: 'long', timeZone: 'UTC' });
 const moscowTimeFormat = new Intl.DateTimeFormat('ru-RU', {
   timeZone: 'Europe/Moscow', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
@@ -555,6 +556,27 @@ function calendarDay(date, day, today, lessons, cardPrefix = 'lesson-') {
   return column;
 }
 
+function renderHomeWeekLabel() {
+  if (!schedule) return;
+  const dates = weekDates(schedule.weekStart);
+  const first = dates[0];
+  const last = dates.at(-1);
+  const label = byId('home-week-label');
+  const full = dateFormat.formatRange(first, last);
+  label.classList.remove('compact-week-label');
+  label.removeAttribute('title');
+  label.textContent = full;
+  if (!mobileLayout.matches || first.getUTCFullYear() === last.getUTCFullYear() || !label.getClientRects().length) return;
+  const range = label.parentElement;
+  if (range.getBoundingClientRect().top < range.previousElementSibling.getBoundingClientRect().bottom) return;
+  label.classList.add('compact-week-label');
+  label.title = full;
+  label.textContent = shortWeekDateFormat.formatRange(first, last)
+    .replace(/\s*г\./g, '')
+    .replace(/\s*–\s*/g, '–')
+    .replace(/\s+/g, '\u200a');
+}
+
 function renderWeek(lessons, today, start) {
   const dates = weekDates(start);
   const isoDates = dates.map((day) => day.toISOString().slice(0, 10));
@@ -567,7 +589,7 @@ function renderWeek(lessons, today, start) {
   picker.querySelectorAll('label').forEach((label) => label.remove());
   grid.replaceChildren();
   homeWeek.querySelectorAll('label').forEach((label) => label.remove());
-  byId('home-week-label').textContent = byId('week-label').textContent;
+  renderHomeWeekLabel();
 
   for (const [index, isoDate] of isoDates.entries()) {
     const label = element('label', 'day-option');
@@ -3289,7 +3311,15 @@ for (const button of document.querySelectorAll('[data-schedule-retry]')) {
   button.addEventListener('click', loadSchedule);
 }
 
+let homeWeekHeadingWidth = 0;
+new ResizeObserver(([{ contentRect: { width } }]) => {
+  if (width === homeWeekHeadingWidth) return;
+  homeWeekHeadingWidth = width;
+  if (width) renderHomeWeekLabel();
+}).observe(byId('home-week-label').closest('.panel-heading'));
+
 mobileLayout.addEventListener('change', () => {
+  renderHomeWeekLabel();
   if (profile && window.location.hash === '#menu') route(true);
 });
 

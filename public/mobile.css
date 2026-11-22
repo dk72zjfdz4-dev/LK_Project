@@ -29,7 +29,7 @@
     padding: 4px max(6px, env(safe-area-inset-right))
       calc(4px + env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
     border-top: 1px solid var(--glass-edge);
-    background: var(--glass-dense);
+    background: var(--surface);
     box-shadow: 0 -4px 16px rgb(23 46 90 / 8%);
   }
 
